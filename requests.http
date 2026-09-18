@@ -1,0 +1,24 @@
+### Crypto Tracker API — manual requests (Stage 0: base setup)
+### Use with the REST Client extension (VS Code) or any compatible .http runner.
+### Run `npm run dev` first, then send requests against http://localhost:3000.
+
+@baseUrl = http://localhost:3000
+
+### Liveness: never touches the database.
+GET {{baseUrl}}/health
+
+### Readiness: checks Mongo connectivity (200 when up, 503 when down).
+GET {{baseUrl}}/health/ready
+
+### Request id is echoed back when supplied by the client.
+GET {{baseUrl}}/health
+X-Request-Id: manual-test-123
+
+### Unknown route -> 404 NOT_FOUND with the global error format.
+GET {{baseUrl}}/no-existe
+
+### Malformed JSON body -> 400 VALIDATION_ERROR ("JSON inválido").
+POST {{baseUrl}}/health
+Content-Type: application/json
+
+{"invalid": json}

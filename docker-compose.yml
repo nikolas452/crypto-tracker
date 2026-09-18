@@ -1,0 +1,30 @@
+services:
+  mongo:
+    image: mongo:8
+    container_name: crypto-tracker-mongo
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    # From stage 5 onward, transactions require a replica set. To switch this
+    # single-node instance into a replica set for local development, replace
+    # the service above with:
+    #
+    # mongo:
+    #   image: mongo:8
+    #   container_name: crypto-tracker-mongo
+    #   restart: unless-stopped
+    #   command: ['--replSet', 'rs0', '--bind_ip_all']
+    #   ports:
+    #     - '27017:27017'
+    #   volumes:
+    #     - mongo_data:/data/db
+    #   healthcheck:
+    #     test: mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate().ok }"
+    #     interval: 5s
+    #     timeout: 5s
+    #     retries: 10
+
+volumes:
+  mongo_data:
