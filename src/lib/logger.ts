@@ -21,6 +21,11 @@ const REDACT_PATHS = [
   '*.mongoUri',
   '*.uri',
   '*.secret',
+  '*.COINGECKO_API_KEY',
+  '*.coingeckoApiKey',
+  'req.headers["x-cg-demo-api-key"]',
+  'headers["x-cg-demo-api-key"]',
+  '*.headers["x-cg-demo-api-key"]',
 ];
 
 export const logger = pino({

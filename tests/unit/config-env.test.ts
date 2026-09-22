@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { EnvValidationError, parseEnv } from '../../src/config/env.js';
+import { describe, expect, it, vi } from 'vitest';
+import { assertCoinGeckoApiKey, EnvValidationError, parseEnv } from '../../src/config/env.js';
 
 describe('parseEnv', () => {
   it('returns a fully-typed config with defaults applied for a valid source', () => {
@@ -12,6 +12,16 @@ describe('parseEnv', () => {
       MONGODB_DB_NAME: 'crypto_tracker',
       LOG_LEVEL: 'info',
       SHUTDOWN_TIMEOUT_MS: 10000,
+      COINGECKO_BASE_URL: 'https://api.coingecko.com/api/v3',
+      COINGECKO_TIMEOUT_MS: 10000,
+      COINGECKO_MAX_RETRIES: 2,
+      COINGECKO_MAX_IDS_PER_CALL: 50,
+      POLL_PRICES_CRON: '*/10 * * * *',
+      POLL_PRICES_RUN_ON_START: true,
+      SNAPSHOT_RETENTION_DAYS: 90,
+      JOB_RUNS_RETENTION_DAYS: 30,
+      STALE_RUN_THRESHOLD_MIN: 15,
+      WORKER_SHUTDOWN_TIMEOUT_MS: 30000,
     });
   });
 
@@ -113,5 +123,94 @@ describe('parseEnv', () => {
     expect(() =>
       parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', MONGODB_DB_NAME: '' }),
     ).toThrow(EnvValidationError);
+  });
+
+  it('leaves COINGECKO_API_KEY undefined when not provided', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.COINGECKO_API_KEY).toBeUndefined();
+  });
+
+  it('accepts a COINGECKO_API_KEY when provided', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      COINGECKO_API_KEY: 'demo-key',
+    });
+
+    expect(config.COINGECKO_API_KEY).toBe('demo-key');
+  });
+
+  it('parses POLL_PRICES_RUN_ON_START as a boolean', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      POLL_PRICES_RUN_ON_START: 'false',
+    });
+
+    expect(config.POLL_PRICES_RUN_ON_START).toBe(false);
+  });
+
+  it('defaults SNAPSHOT_RETENTION_DAYS to 90 when unset', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.SNAPSHOT_RETENTION_DAYS).toBe(90);
+  });
+
+  it('treats an empty SNAPSHOT_RETENTION_DAYS as no expiration (null)', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      SNAPSHOT_RETENTION_DAYS: '',
+    });
+
+    expect(config.SNAPSHOT_RETENTION_DAYS).toBeNull();
+  });
+
+  it('coerces a numeric SNAPSHOT_RETENTION_DAYS string', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      SNAPSHOT_RETENTION_DAYS: '30',
+    });
+
+    expect(config.SNAPSHOT_RETENTION_DAYS).toBe(30);
+  });
+
+  it('rejects a COINGECKO_MAX_RETRIES outside 0-5', () => {
+    expect(() =>
+      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', COINGECKO_MAX_RETRIES: '6' }),
+    ).toThrow(EnvValidationError);
+  });
+
+  it('rejects a COINGECKO_MAX_IDS_PER_CALL outside 1-250', () => {
+    expect(() =>
+      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', COINGECKO_MAX_IDS_PER_CALL: '0' }),
+    ).toThrow(EnvValidationError);
+  });
+});
+
+describe('assertCoinGeckoApiKey', () => {
+  it('does not exit when COINGECKO_API_KEY is present', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      COINGECKO_API_KEY: 'demo-key',
+    });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertCoinGeckoApiKey(config, logger);
+
+    expect(logger.fatal).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+  });
+
+  it('logs fatal and exits with code 1 when COINGECKO_API_KEY is missing', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertCoinGeckoApiKey(config, logger);
+
+    expect(logger.fatal).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
   });
 });

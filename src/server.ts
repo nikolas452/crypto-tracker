@@ -2,6 +2,7 @@ import http from 'node:http';
 import { config } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { connectDb, disconnectDb } from './db/connect.js';
+import { ensureCollections } from './db/ensureCollections.js';
 import { createApp } from './app.js';
 
 /**
@@ -14,6 +15,7 @@ async function main(): Promise<void> {
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
     isProduction: config.NODE_ENV === 'production',
   });
+  await ensureCollections(logger);
 
   const app = createApp({ logger });
   const server = http.createServer(app);

@@ -3,12 +3,19 @@
 Backend project (API + background processes, no frontend) that polls cryptocurrency
 prices from CoinGecko, stores history in MongoDB, and exposes a REST API to query
 coins, history and stats. See `requerimientos/00-indice-y-convenciones.md` for the
-full project index and conventions, and `requerimientos/01-etapa-0-setup-base.md`
-for this stage's detailed requirements.
+full project index and conventions, `requerimientos/01-etapa-0-setup-base.md` for
+Stage 0's requirements, and `requerimientos/02-etapa-1-primer-job.md` for this
+stage's detailed requirements.
 
-This stage ("Stage 0 — base setup") only provides the base Express/TypeScript
-service: startup, config validation, MongoDB connection, health checks, a single
-error format, and graceful shutdown. No business domain, auth, jobs or deploy yet.
+Stage 0 ("base setup") provided the base Express/TypeScript service: startup,
+config validation, MongoDB connection, health checks, a single error format, and
+graceful shutdown.
+
+**Stage 1 ("primer job")** adds the project's first real background job: a second
+process (`src/worker.ts`), separate from the API, that polls CoinGecko for prices
+on a schedule (`node-cron`) and stores them as a MongoDB time-series collection,
+with full execution tracking (`job_runs`) so the job's health is verifiable from
+the database alone — no endpoints to read this data yet (that's Stage 2).
 
 ## Requirements
 
@@ -62,6 +69,17 @@ error format, and graceful shutdown. No business domain, auth, jobs or deploy ye
 | `MONGODB_DB_NAME` | string | No | `crypto_tracker` | Non-empty |
 | `LOG_LEVEL` | pino level | No | `info` | `fatal`\|`error`\|`warn`\|`info`\|`debug`\|`trace`\|`silent` |
 | `SHUTDOWN_TIMEOUT_MS` | integer | No | `10000` | >= 1000 |
+| `COINGECKO_API_KEY` | string | **Only for worker/scripts** | — | CoinGecko Demo plan key. Optional at the schema level (the API process doesn't need it until Stage 4); `worker.ts`, `seed:coins` and `job:poll-prices` each fail fast if it's missing |
+| `COINGECKO_BASE_URL` | string | No | `https://api.coingecko.com/api/v3` | Demo-key root, not `pro-api` |
+| `COINGECKO_TIMEOUT_MS` | integer | No | `10000` | Per-attempt HTTP timeout |
+| `COINGECKO_MAX_RETRIES` | integer | No | `2` | 0–5 |
+| `COINGECKO_MAX_IDS_PER_CALL` | integer | No | `50` | 1–250 |
+| `POLL_PRICES_CRON` | cron expression | No | `*/10 * * * *` | Validated with `cron.validate()`; runs in UTC |
+| `POLL_PRICES_RUN_ON_START` | boolean | No | `true` | Also runs the job once (`trigger: "startup"`) when the worker boots |
+| `SNAPSHOT_RETENTION_DAYS` | integer \| empty | No | `90` | TTL for `price_snapshots`; empty = no expiration |
+| `JOB_RUNS_RETENTION_DAYS` | integer | No | `30` | TTL for `job_runs` |
+| `STALE_RUN_THRESHOLD_MIN` | integer | No | `15` | A `running` `JobRun` older than this is recovered as `failed`/`STALE` on worker startup |
+| `WORKER_SHUTDOWN_TIMEOUT_MS` | integer | No | `30000` | Max time the worker waits for an in-progress run to finish during shutdown |
 
 `src/config/env.ts` is the **only** module allowed to read `process.env` (enforced
 by an ESLint `no-restricted-properties` rule). Every other module imports the
@@ -74,14 +92,18 @@ invalid, the process logs the invalid variable **names** (never their values) at
 | Script | What it does |
 | --- | --- |
 | `npm run dev` | API with auto-reload (`tsx watch src/server.ts`) |
+| `npm run dev:worker` | Worker with auto-reload (`tsx watch src/worker.ts`) |
 | `npm run build` | Compiles `src/` to `dist/` with `tsc` |
 | `npm start` | Runs the compiled API (`node dist/server.js`) |
+| `npm run start:worker` | Runs the compiled worker (`node dist/worker.js`) |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
 | `npm run format` | Prettier (writes changes) |
 | `npm test` | Runs the Vitest suite once |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run test:coverage` | Vitest with coverage report |
+| `npm run seed:coins` | Upserts the tracked coin catalog from CoinGecko (Stage 1) |
+| `npm run job:poll-prices` | Runs the `poll-prices` job exactly once, outside the scheduler (Stage 1) |
 
 ## Running tests
 

@@ -1,0 +1,81 @@
+import { fileURLToPath } from 'node:url';
+import { assertCoinGeckoApiKey, config } from '../config/env.js';
+import { logger } from '../lib/logger.js';
+import { connectDb, disconnectDb } from '../db/connect.js';
+import { ensureCollections } from '../db/ensureCollections.js';
+import { systemClock } from '../lib/clock.js';
+import { createWorkerId } from '../lib/workerId.js';
+import { createCoinGeckoClient } from '../integrations/coingecko/coingecko.client.js';
+import { createCoinsRepo } from '../modules/coins/coins.service.js';
+import { createSnapshotsRepo } from '../modules/snapshots/snapshots.service.js';
+import { createJobRunsRepo } from '../modules/job-runs/job-runs.service.js';
+import { createPollPricesJob, type JobRunResult } from '../jobs/pollPrices.js';
+
+/**
+ * `npm run job:poll-prices` (RF-1.8): runs the `poll-prices` job exactly
+ * once with `trigger: "manual"`, prints the result and exits.
+ *
+ * Does NOT coordinate with the worker's in-memory overlap guard — that flag
+ * lives only inside the worker process's memory. If this script runs while
+ * the worker is mid-tick, both may execute concurrently; the job's own
+ * deduplication (by `sourceUpdatedAt`, one aggregation per run) is what
+ * prevents duplicate snapshot data in that case, not a shared lock. Real
+ * cross-process coordination is deferred to stage 6 (Agenda-based locking).
+ */
+export function exitCodeFor(status: JobRunResult['status']): 0 | 1 {
+  return status === 'failed' ? 1 : 0;
+}
+
+function printResult(result: JobRunResult): void {
+  console.log(
+    `job:poll-prices result: status=${result.status}${result.skipReason ? ` skipReason=${result.skipReason}` : ''} durationMs=${result.durationMs}`,
+  );
+  console.log(`stats: ${JSON.stringify(result.stats)}`);
+  if (result.error) {
+    console.log(`error: ${result.error.code} - ${result.error.message}`);
+  }
+}
+
+async function main(): Promise<void> {
+  assertCoinGeckoApiKey(config, logger);
+
+  await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
+    isProduction: config.NODE_ENV === 'production',
+  });
+  await ensureCollections(logger);
+
+  const coingecko = createCoinGeckoClient({
+    baseUrl: config.COINGECKO_BASE_URL,
+    apiKey: config.COINGECKO_API_KEY,
+    timeoutMs: config.COINGECKO_TIMEOUT_MS,
+    maxRetries: config.COINGECKO_MAX_RETRIES,
+    maxIdsPerCall: config.COINGECKO_MAX_IDS_PER_CALL,
+    logger,
+  });
+
+  const job = createPollPricesJob({
+    coinsRepo: createCoinsRepo(),
+    snapshotsRepo: createSnapshotsRepo(),
+    jobRunsRepo: createJobRunsRepo(),
+    coingecko,
+    clock: systemClock,
+    logger,
+    workerId: createWorkerId(),
+  });
+
+  const result = await job.run('manual');
+  printResult(result);
+
+  await disconnectDb();
+
+  process.exitCode = exitCodeFor(result.status);
+}
+
+const isMainModule = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isMainModule) {
+  main().catch((err: unknown) => {
+    logger.fatal({ err }, 'job:poll-prices failed');
+    process.exitCode = 1;
+  });
+}
