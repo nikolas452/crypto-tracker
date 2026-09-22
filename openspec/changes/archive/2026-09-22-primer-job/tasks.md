@@ -55,10 +55,10 @@
 
 - [x] 7.1 Implement `npm run job:poll-prices`: connect, `ensureCollections()`, run the job once with `trigger: "manual"`, print the result.
 - [x] 7.2 Implement the exit-code mapping (0 for success/partial/skipped, 1 for failed).
-- [ ] 7.3 Document the overlap limitation relative to the worker (no shared lock; deduplication mitigates duplicate data) in the README.
+- [x] 7.3 Document the overlap limitation relative to the worker (no shared lock; deduplication mitigates duplicate data) in the README.
 
 ## 8. npm scripts and documentation
 
 - [x] 8.1 Add npm scripts: `dev:worker`, `start:worker`, `seed:coins`, `job:poll-prices`.
-- [ ] 8.2 Update the README with: how to run the worker in development, how to seed coins, how to run the job manually, the quota formula from RNF-1.1, and manual verification steps for the 30-minute Compass check.
-- [ ] 8.3 Confirm `typecheck`, `lint`, and `test` all pass, and that the CoinGecko API key never appears in the repo, logs, or git history.
+- [x] 8.2 Update the README with: how to run the worker in development, how to seed coins, how to run the job manually, the quota formula from RNF-1.1, and manual verification steps for the 30-minute Compass check.
+- [x] 8.3 Confirm `typecheck`, `lint`, and `test` all pass, and that the CoinGecko API key never appears in the repo, logs, or git history.

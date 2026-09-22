@@ -105,6 +105,63 @@ invalid, the process logs the invalid variable **names** (never their values) at
 | `npm run seed:coins` | Upserts the tracked coin catalog from CoinGecko (Stage 1) |
 | `npm run job:poll-prices` | Runs the `poll-prices` job exactly once, outside the scheduler (Stage 1) |
 
+## Background worker (Stage 1)
+
+The worker (`src/worker.ts`) is a **separate process** from the API — it polls
+CoinGecko for prices on a schedule and stores them as a time series. It needs
+its own API key and, before it has anything to poll, a seeded coin catalog.
+
+1. Get a free [CoinGecko Demo plan API key](https://www.coingecko.com/en/api/pricing)
+   and set `COINGECKO_API_KEY` in your `.env`. The API process does not need
+   this key (only Stage 4 will); `worker.ts`, `seed:coins` and
+   `job:poll-prices` each fail fast if it's missing.
+2. Seed the coin catalog (idempotent — safe to run again):
+
+   ```bash
+   npm run seed:coins
+   # or with an explicit list:
+   npm run seed:coins -- bitcoin,ethereum
+   ```
+
+3. Run the worker in development mode:
+
+   ```bash
+   npm run dev:worker
+   ```
+
+   On success you should see a startup log with `workerId`, the cron
+   expression, and the active coin count, followed by one `poll-prices` run
+   (`POLL_PRICES_RUN_ON_START` defaults to `true`) and then one run every
+   `POLL_PRICES_CRON` interval (default: every 10 minutes, UTC).
+
+4. To run the job once without the scheduler:
+
+   ```bash
+   npm run job:poll-prices
+   ```
+
+   **Overlap caveat:** this script does **not** coordinate with the worker's
+   in-memory overlap guard — that flag only exists inside the worker
+   process's memory. If you run this while the worker is mid-tick, both may
+   execute concurrently. This is a documented limitation, not a bug: the
+   job's own deduplication (by `sourceUpdatedAt`, one aggregation per run)
+   prevents duplicate snapshot data even if both runs overlap. Real
+   cross-process locking is deferred to Stage 6 (Agenda).
+
+### CoinGecko quota
+
+The Demo plan allows 100 calls/minute and **10,000 calls/month**. Estimate
+monthly consumption with:
+
+```
+calls/month ≈ (60 / interval_min) × 24 × 31 × ceil(coins / 50)
+```
+
+With the defaults (10 coins, `POLL_PRICES_CRON` every 10 minutes), that's
+≈ 4,464 calls/month from the scheduler alone — comfortably under the cap, but
+leave headroom for `seed:coins` runs and manual `job:poll-prices` executions
+when budgeting a shorter interval or a larger coin list.
+
 ## Running tests
 
 ```bash
@@ -173,6 +230,25 @@ are verified manually instead:
 5. **Expected:** the log shows `shutdown iniciado`, the in-flight request still
    completes successfully (the client receives its response), and only
    afterwards does the process exit with code `0`.
+
+### E1 — 30-minute worker verification (Compass)
+
+This one can't be reliably automated and is verified by hand:
+
+1. Set a real `COINGECKO_API_KEY` in `.env` and run `npm run seed:coins`.
+2. Start the worker: `npm run dev:worker`.
+3. Let it run for at least 30 minutes (three ticks at the default 10-minute
+   interval), then open the database in MongoDB Compass (or `mongosh`) and
+   check:
+   - `price_snapshots` has new documents for each active coin, one batch per
+     tick, all documents in a batch sharing the same `timestamp`.
+   - `job_runs` has one document per tick, `status: "success"` (or
+     `"partial"`/`"skipped"` if something legitimately didn't return data),
+     with `stats` populated and `error: null`.
+   - No document in either collection contains the CoinGecko API key or any
+     other secret.
+4. Stop the worker with `Ctrl+C` (`SIGINT`) and confirm it logs
+   `shutdown iniciado`, waits for any in-progress run, and exits cleanly.
 
 ## No secrets
 
