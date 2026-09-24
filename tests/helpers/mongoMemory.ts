@@ -27,6 +27,10 @@ export async function stopInMemoryMongo(): Promise<void> {
 
 /** Elimina todos los documentos de cada colección para que cada test arranque desde una base limpia. */
 export async function clearDatabase(): Promise<void> {
+  if (mongoose.connection.readyState !== mongoose.ConnectionStates.connected) {
+    return;
+  }
+
   const { collections } = mongoose.connection;
   await Promise.all(Object.values(collections).map((collection) => collection.deleteMany({})));
 }
