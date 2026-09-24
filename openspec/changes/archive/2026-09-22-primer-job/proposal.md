@@ -17,6 +17,7 @@ The API base from `setup-base` runs, connects to MongoDB, and reports health —
 ## Capabilities
 
 ### New Capabilities
+
 - `coin-catalog`: the `coins` collection — schema, uniqueness on `coingeckoId`, `isActive` flag that the job uses to decide what to poll.
 - `price-snapshot-store`: the `price_snapshots` time-series collection, its fixed shape (`timestamp`, `meta.coinId`, `meta.coingeckoId`, price fields), its secondary index, and `ensureCollections()`'s creation/validation/retention-update behavior.
 - `job-run-tracking`: the `job_runs` collection — the run lifecycle (`running` → `success`/`partial`/`failed`/`skipped`), its stats fields, indexes, and TTL-based retention.
@@ -27,6 +28,7 @@ The API base from `setup-base` runs, connects to MongoDB, and reports health —
 - `manual-job-run`: the `job:poll-prices` script — single manual execution, its exit-code contract, and its documented overlap limitation relative to the worker.
 
 ### Modified Capabilities
+
 None — this stage only adds new collections, a new external integration, and a new process; nothing from `setup-base` changes its existing behavior. (`ensureCollections()` and the worker reuse `setup-base`'s `connectDb`/`disconnectDb`, config validation, and logger as-is.)
 
 ## Impact

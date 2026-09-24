@@ -6,10 +6,10 @@ import { ensureCollections } from './db/ensureCollections.js';
 import { createApp } from './app.js';
 
 /**
- * Process entrypoint for the API. Reads config, connects the database, only
- * then builds the app and opens the socket, and registers the ordered
- * shutdown sequence. This is the ONLY place in the codebase that calls
- * `listen()`.
+ * Punto de entrada del proceso de la API. Lee la config, conecta la base de
+ * datos, y solo entonces construye la app y abre el socket, y registra la
+ * secuencia ordenada de apagado. Este es el ÚNICO lugar en el código que
+ * llama a `listen()`.
  */
 async function main(): Promise<void> {
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {

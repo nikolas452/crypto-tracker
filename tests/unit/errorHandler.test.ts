@@ -4,6 +4,11 @@ import type { NextFunction, Request, Response } from 'express';
 import { createErrorHandler } from '../../src/middlewares/errorHandler.js';
 import { NotFoundError, ValidationError } from '../../src/lib/errors.js';
 
+/**
+ * Tests unitarios del middleware `createErrorHandler` de
+ * `src/middlewares/errorHandler.ts`.
+ */
+
 interface FakeResponse {
   headersSent: boolean;
   statusCode: number;
@@ -47,7 +52,9 @@ function createFakeRes(): FakeResponse {
 function getErrorBody(res: FakeResponse): {
   error: { code: string; message: string; requestId: string; details?: unknown };
 } {
-  return res.body as { error: { code: string; message: string; requestId: string; details?: unknown } };
+  return res.body as {
+    error: { code: string; message: string; requestId: string; details?: unknown };
+  };
 }
 
 describe('createErrorHandler', () => {

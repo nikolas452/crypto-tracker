@@ -18,6 +18,7 @@ The worker from `primer-job` has been filling `price_snapshots` and `job_runs` s
 ## Capabilities
 
 ### New Capabilities
+
 - `coin-read-api`: `GET /api/v1/coins` (offset pagination, `sort`/`order`/`q` with strict rejection of unknown params, escaped prefix search over `symbol`/`nameLower`, coins without `latest` sorted last) and `GET /api/v1/coins/:coingeckoId` (404 for unknown or inactive coins, `trackedSince`).
 - `price-history-api`: `GET /api/v1/coins/:coingeckoId/history` — automatic interval selection, per-interval maximum ranges, the `raw` point cap, the `$dateTrunc` OHLC pipeline, the optional `$setWindowFields` simple moving average with `null` for the first `sma - 1` buckets, and the no-gap-filling rule.
 - `price-stats-api`: `GET /api/v1/coins/:coingeckoId/stats` — the single pipeline computing `open`/`close`/`min`/`max`/`avg`/`samples`/`firstAt`/`lastAt` over a `range` enum, the `changePct` formula, and the empty-range response shape.
@@ -29,6 +30,7 @@ The worker from `primer-job` has been filling `price_snapshots` and `job_runs` s
 - `data-maintenance-scripts`: `npm run coins:rebuild-latest` (idempotent recomputation of `latest` for every coin) and the optional `npm run backfill:history` (CoinGecko `market_chart` import with a quota-consumption confirmation prompt and a documented overlap rule).
 
 ### Modified Capabilities
+
 - `coin-catalog`: the `coins` document gains the `latest` sub-document (`priceUsd`, `marketCapUsd`, `volume24hUsd`, `change24hPct`, `capturedAt`, `sourceUpdatedAt`), a `nameLower` field maintained on save and on seed upsert, and four new indexes supporting sorting by market cap and 24h change and prefix search by name and symbol.
 - `price-polling-job`: the run now has a final step that refreshes `coins.latest` in one `bulkWrite` with a staleness guard per coin, reports `stats.latestUpdated`, and downgrades the run to `partial` with `error.code: LATEST_UPDATE_FAILED` if that write fails without discarding the snapshots already inserted.
 - `job-run-tracking`: the `stats` object gains `latestUpdated`.

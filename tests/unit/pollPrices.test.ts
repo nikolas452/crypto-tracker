@@ -2,12 +2,26 @@ import { describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 import type { Logger } from 'pino';
 import { createPollPricesJob } from '../../src/jobs/pollPrices.js';
-import type { ActiveCoin, CoinsRepo } from '../../src/modules/coins/coins.service.js';
-import type { NewSnapshotInput, SnapshotsRepo } from '../../src/modules/snapshots/snapshots.service.js';
-import type { CloseRunInput, CreateRunningInput, JobRunsRepo } from '../../src/modules/job-runs/job-runs.service.js';
+import type {
+  ActiveCoin,
+  CoinsRepo,
+  LatestRefreshInput,
+  RefreshLatestResult,
+} from '../../src/modules/coins/coins.service.js';
+import type {
+  NewSnapshotInput,
+  SnapshotsRepo,
+} from '../../src/modules/snapshots/snapshots.service.js';
+import type {
+  CloseRunInput,
+  CreateRunningInput,
+  JobRunsRepo,
+} from '../../src/modules/job-runs/job-runs.service.js';
 import type { SimplePrice } from '../../src/integrations/coingecko/coingecko.types.js';
 import { CoinGeckoError } from '../../src/integrations/coingecko/coingecko.errors.js';
 import type { Clock } from '../../src/lib/clock.js';
+
+/** Tests unitarios del job `createPollPricesJob` de `src/jobs/pollPrices.ts`. */
 
 function createFakeLogger(): Logger {
   return {
@@ -51,18 +65,35 @@ function createSteppingClock(startAt: Date, stepMs = 50): Clock {
   };
 }
 
-interface FakeCoinsRepo extends CoinsRepo {
-  coins: ActiveCoin[];
+interface FakeCoinsRepoOptions {
+  refreshLatest?: (updates: readonly LatestRefreshInput[]) => Promise<RefreshLatestResult>;
 }
 
-function createFakeCoinsRepo(coins: ActiveCoin[]): FakeCoinsRepo {
+interface FakeCoinsRepo extends CoinsRepo {
+  coins: ActiveCoin[];
+  refreshLatestCalls: Array<readonly LatestRefreshInput[]>;
+}
+
+function createFakeCoinsRepo(
+  coins: ActiveCoin[],
+  options: FakeCoinsRepoOptions = {},
+): FakeCoinsRepo {
+  const refreshLatestCalls: Array<readonly LatestRefreshInput[]> = [];
   return {
     coins,
+    refreshLatestCalls,
     async findActive() {
       return coins;
     },
     async upsertFromMarket() {
       throw new Error('not used in job tests');
+    },
+    async refreshLatest(updates) {
+      refreshLatestCalls.push(updates);
+      if (options.refreshLatest) {
+        return options.refreshLatest(updates);
+      }
+      return { matchedCount: updates.length, modifiedCount: updates.length };
     },
   };
 }
@@ -71,7 +102,9 @@ interface FakeSnapshotsRepoOptions {
   lastSourceUpdatedAt?: Map<string, Date | null>;
 }
 
-function createFakeSnapshotsRepo(options: FakeSnapshotsRepoOptions = {}): SnapshotsRepo & { inserted: NewSnapshotInput[] } {
+function createFakeSnapshotsRepo(
+  options: FakeSnapshotsRepoOptions = {},
+): SnapshotsRepo & { inserted: NewSnapshotInput[] } {
   const inserted: NewSnapshotInput[] = [];
   return {
     inserted,
@@ -85,7 +118,10 @@ function createFakeSnapshotsRepo(options: FakeSnapshotsRepoOptions = {}): Snapsh
   };
 }
 
-function createFakeJobRunsRepo(): JobRunsRepo & { closed: Array<{ id: Types.ObjectId; patch: CloseRunInput }>; created: CreateRunningInput[] } {
+function createFakeJobRunsRepo(): JobRunsRepo & {
+  closed: Array<{ id: Types.ObjectId; patch: CloseRunInput }>;
+  created: CreateRunningInput[];
+} {
   const closed: Array<{ id: Types.ObjectId; patch: CloseRunInput }> = [];
   const created: CreateRunningInput[] = [];
   return {
@@ -232,8 +268,8 @@ describe('createPollPricesJob', () => {
     expect(result.stats.missingCoins).toEqual(['solana']);
   });
 
-  // E1-8: attempts reflects total upstream calls including retries (the client itself is faked here,
-  // simulating that it already retried twice before succeeding).
+  // E1-8: attempts refleja el total de llamadas upstream incluyendo reintentos (el cliente en sí está
+  // faked acá, simulando que ya reintentó dos veces antes de tener éxito).
   it('E1-8: reflects upstreamAttempts from the CoinGecko client result', async () => {
     const coins = [activeCoin('bitcoin')];
     const coinsRepo = createFakeCoinsRepo(coins);
@@ -268,7 +304,11 @@ describe('createPollPricesJob', () => {
     const jobRunsRepo = createFakeJobRunsRepo();
     const getSimplePrices = vi
       .fn()
-      .mockRejectedValue(new CoinGeckoError('COINGECKO_UNAVAILABLE', 'CoinGecko responded with status 503', { retryable: true }));
+      .mockRejectedValue(
+        new CoinGeckoError('COINGECKO_UNAVAILABLE', 'CoinGecko responded with status 503', {
+          retryable: true,
+        }),
+      );
 
     const job = createPollPricesJob({
       coinsRepo,
@@ -353,13 +393,17 @@ describe('createPollPricesJob', () => {
       workerId: 'w',
     });
 
-    await expect(job.run('schedule')).resolves.toMatchObject({ status: 'skipped', skipReason: 'no_active_coins' });
+    await expect(job.run('schedule')).resolves.toMatchObject({
+      status: 'skipped',
+      skipReason: 'no_active_coins',
+    });
   });
 
   it('run() never throws on an unexpected synchronous-looking dependency rejection', async () => {
     const coinsRepo: CoinsRepo = {
       findActive: vi.fn().mockRejectedValue(new TypeError('boom')),
       upsertFromMarket: vi.fn(),
+      refreshLatest: vi.fn(),
     };
     const snapshotsRepo = createFakeSnapshotsRepo();
     const jobRunsRepo = createFakeJobRunsRepo();
@@ -377,5 +421,104 @@ describe('createPollPricesJob', () => {
     const result = await job.run('schedule');
     expect(result.status).toBe('failed');
     expect(result.error?.code).toBe('INTERNAL');
+  });
+
+  // 3.5: refresh de coins.latest
+  it('3.5: coins skipped as unchanged produce no refreshLatest update operation', async () => {
+    const sameInstant = new Date('2026-01-01T00:00:00.000Z');
+    const coins = [activeCoin('bitcoin'), activeCoin('ethereum')];
+    const coinsRepo = createFakeCoinsRepo(coins);
+    const snapshotsRepo = createFakeSnapshotsRepo({
+      lastSourceUpdatedAt: new Map([['bitcoin', sameInstant]]),
+    });
+    const jobRunsRepo = createFakeJobRunsRepo();
+    const getSimplePrices = vi.fn().mockResolvedValue({
+      prices: new Map([
+        ['bitcoin', simplePrice({ sourceUpdatedAt: sameInstant })],
+        ['ethereum', simplePrice({ sourceUpdatedAt: new Date('2026-01-01T00:05:00.000Z') })],
+      ]),
+      attempts: 1,
+    });
+
+    const job = createPollPricesJob({
+      coinsRepo,
+      snapshotsRepo,
+      jobRunsRepo,
+      coingecko: { getSimplePrices },
+      clock: createSteppingClock(sameInstant),
+      logger: createFakeLogger(),
+      workerId: 'w',
+    });
+
+    await job.run('schedule');
+
+    expect(coinsRepo.refreshLatestCalls).toHaveLength(1);
+    const updates = coinsRepo.refreshLatestCalls[0] ?? [];
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.coinId).toEqual(coins[1]?.id);
+  });
+
+  it('3.5: stats.latestUpdated counts the coins refreshLatest actually modified', async () => {
+    const coins = [activeCoin('bitcoin'), activeCoin('ethereum')];
+    const coinsRepo = createFakeCoinsRepo(coins, {
+      // Simula la guarda de staleness matcheando ambos pero modificando solo uno.
+      refreshLatest: async (updates) => ({ matchedCount: updates.length, modifiedCount: 1 }),
+    });
+    const snapshotsRepo = createFakeSnapshotsRepo();
+    const jobRunsRepo = createFakeJobRunsRepo();
+    const getSimplePrices = vi.fn().mockResolvedValue({
+      prices: new Map([
+        ['bitcoin', simplePrice()],
+        ['ethereum', simplePrice()],
+      ]),
+      attempts: 1,
+    });
+
+    const job = createPollPricesJob({
+      coinsRepo,
+      snapshotsRepo,
+      jobRunsRepo,
+      coingecko: { getSimplePrices },
+      clock: createSteppingClock(new Date()),
+      logger: createFakeLogger(),
+      workerId: 'w',
+    });
+
+    const result = await job.run('schedule');
+
+    expect(result.stats.latestUpdated).toBe(1);
+    expect(result.status).toBe('success');
+  });
+
+  it('3.5: a throwing refreshLatest (bulkWrite) yields partial with LATEST_UPDATE_FAILED, keeping the inserted snapshots', async () => {
+    const coins = [activeCoin('bitcoin')];
+    const coinsRepo = createFakeCoinsRepo(coins, {
+      refreshLatest: async () => {
+        throw new Error('bulkWrite failed');
+      },
+    });
+    const snapshotsRepo = createFakeSnapshotsRepo();
+    const jobRunsRepo = createFakeJobRunsRepo();
+    const getSimplePrices = vi.fn().mockResolvedValue({
+      prices: new Map([['bitcoin', simplePrice()]]),
+      attempts: 1,
+    });
+
+    const job = createPollPricesJob({
+      coinsRepo,
+      snapshotsRepo,
+      jobRunsRepo,
+      coingecko: { getSimplePrices },
+      clock: createSteppingClock(new Date()),
+      logger: createFakeLogger(),
+      workerId: 'w',
+    });
+
+    const result = await job.run('schedule');
+
+    expect(result.status).toBe('partial');
+    expect(result.error?.code).toBe('LATEST_UPDATE_FAILED');
+    expect(result.stats.snapshotsInserted).toBe(1);
+    expect(snapshotsRepo.inserted).toHaveLength(1);
   });
 });

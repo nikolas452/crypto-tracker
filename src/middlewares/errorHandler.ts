@@ -48,13 +48,14 @@ function sendError(
 }
 
 /**
- * Single centralized error-handling middleware (registered last). Maps any
- * error thrown in the chain to the project's global `{ error: { code,
- * message, details?, requestId } }` shape.
+ * Middleware único y centralizado de manejo de errores (se registra al
+ * final). Mapea cualquier error lanzado en la cadena a la forma global del
+ * proyecto `{ error: { code, message, details?, requestId } }`.
  *
- * `nodeEnv` defaults to `config.NODE_ENV` but can be overridden, which is
- * what lets unit tests exercise both the `development` (stack included) and
- * `production` (stack hidden) branches without needing a second process.
+ * `nodeEnv` toma por defecto `config.NODE_ENV` pero se puede sobrescribir,
+ * lo que permite que los tests unitarios ejerciten tanto la rama
+ * `development` (con stack incluido) como la `production` (con stack
+ * oculto) sin necesitar un segundo proceso.
  */
 export function createErrorHandler(logger: Logger, nodeEnv: Config['NODE_ENV'] = config.NODE_ENV) {
   return function errorHandler(

@@ -8,7 +8,12 @@ import { createCoinGeckoClient } from '../integrations/coingecko/coingecko.clien
 import type { CoinGeckoClient } from '../integrations/coingecko/coingecko.types.js';
 import { createCoinsRepo, type CoinsRepo } from '../modules/coins/coins.service.js';
 
-/** RF-1.3's default coin list, used when `seed:coins` runs with no argument. */
+/**
+ * Script `seed:coins` (RF-1.3): siembra o actualiza el catálogo de monedas a
+ * partir de una lista de ids de CoinGecko, usando `/coins/markets`.
+ */
+
+/** Lista de monedas por defecto de RF-1.3, usada cuando `seed:coins` corre sin argumentos. */
 export const DEFAULT_COIN_IDS: readonly string[] = [
   'bitcoin',
   'ethereum',
@@ -22,7 +27,7 @@ export const DEFAULT_COIN_IDS: readonly string[] = [
   'avalanche-2',
 ];
 
-/** Trims, lowercases and de-duplicates ids, preserving first-seen order. */
+/** Recorta espacios, pasa a minúsculas y elimina duplicados de los ids, preservando el orden de primera aparición. */
 export function normalizeIds(rawIds: readonly string[]): string[] {
   const seen = new Set<string>();
   for (const raw of rawIds) {
@@ -47,12 +52,16 @@ export interface SeedSummary {
 }
 
 /**
- * Pure seed logic (RF-1.3): normalizes ids, fetches markets, upserts each
- * returned coin, and reports ids CoinGecko didn't return as invalid. Kept
- * separate from the CLI entrypoint below so it can be unit/integration
- * tested with fake/real dependencies without spawning a process.
+ * Lógica pura de siembra (RF-1.3): normaliza ids, obtiene los markets, hace
+ * upsert de cada moneda devuelta, y reporta como inválidos los ids que
+ * CoinGecko no devolvió. Se mantiene separada del entrypoint de CLI de abajo
+ * para poder testearla (unitaria e integración) con dependencias
+ * falsas/reales sin lanzar un proceso.
  */
-export async function runSeedCoins(rawIds: readonly string[], deps: SeedCoinsDeps): Promise<SeedSummary> {
+export async function runSeedCoins(
+  rawIds: readonly string[],
+  deps: SeedCoinsDeps,
+): Promise<SeedSummary> {
   const ids = normalizeIds(rawIds);
   const markets = await deps.coingecko.getMarkets([...ids]);
   const returnedIds = new Set(markets.map((market) => market.coingeckoId));
@@ -116,7 +125,8 @@ async function main(): Promise<void> {
   process.exitCode = validCount > 0 ? 0 : 1;
 }
 
-const isMainModule = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
+const isMainModule =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
 
 if (isMainModule) {
   main().catch((err: unknown) => {

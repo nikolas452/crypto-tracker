@@ -4,6 +4,8 @@ import { createApp } from '../../src/app.js';
 import { logger } from '../../src/lib/logger.js';
 import { startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
 
+/** Tests de integración del manejo global de errores de la aplicación. */
+
 describe('error handling (integration)', () => {
   beforeAll(async () => {
     await startInMemoryMongo();
@@ -17,7 +19,7 @@ describe('error handling (integration)', () => {
     vi.restoreAllMocks();
   });
 
-  // E0-5: unknown route returns the standard 404.
+  // E0-5: una ruta desconocida devuelve el 404 estándar.
   it('E0-5: GET /no-existe returns 404 with the global error format', async () => {
     const app = createApp();
 
@@ -30,9 +32,9 @@ describe('error handling (integration)', () => {
     expect(response.body.error.message).toContain('/no-existe');
   });
 
-  // E0-6: an unexpected error hides the stack in the response outside
-  // development (the suite runs with NODE_ENV=test), but the full error
-  // (with stack) is still logged via the shared logger.
+  // E0-6: un error inesperado oculta el stack en la respuesta fuera de
+  // development (la suite corre con NODE_ENV=test), pero el error completo
+  // (con stack) igual se loguea a través del logger compartido.
   it('E0-6: an unexpected thrown error maps to 500 INTERNAL_ERROR without a stack in the response, logged with stack', async () => {
     const errorSpy = vi.spyOn(logger, 'error');
     const app = createApp({
@@ -55,7 +57,7 @@ describe('error handling (integration)', () => {
     expect(loggedPayload.err?.stack).toContain('boom');
   });
 
-  // E0-7: malformed JSON body returns 400 VALIDATION_ERROR.
+  // E0-7: un body JSON malformado devuelve 400 VALIDATION_ERROR.
   it('E0-7: malformed JSON body returns 400 VALIDATION_ERROR', async () => {
     const app = createApp();
 

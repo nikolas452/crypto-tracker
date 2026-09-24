@@ -2,10 +2,16 @@ import pino from 'pino';
 import { config } from '../config/env.js';
 
 /**
- * Paths pino redacts before any log line is serialized. Covers tokens, API
- * keys, passwords, the `Authorization` header (in any casing Express/Node
- * normalizes to lowercase) and the full Mongo connection string, wherever
- * they might appear on a logged object.
+ * Instancia compartida de pino usada en toda la aplicación, con las rutas
+ * sensibles redactadas antes de serializar cualquier línea de log.
+ */
+
+/**
+ * Rutas que pino redacta antes de serializar cualquier línea de log. Cubre
+ * tokens, API keys, contraseñas, el header `Authorization` (en cualquier
+ * variante de mayúsculas/minúsculas que Express/Node normalice a minúsculas)
+ * y la cadena de conexión completa de Mongo, dondequiera que puedan aparecer
+ * en un objeto logueado.
  */
 const REDACT_PATHS = [
   'req.headers.authorization',

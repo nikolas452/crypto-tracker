@@ -1,6 +1,7 @@
 /**
- * Small abstraction over "now" so time-dependent code (and its tests) don't
- * depend on the real system clock or `Date.now()` directly.
+ * Pequeña abstracción sobre "ahora" para que el código dependiente del tiempo
+ * (y sus tests) no dependa directamente del reloj del sistema ni de
+ * `Date.now()`.
  */
 export interface Clock {
   now(): Date;
@@ -10,7 +11,7 @@ export const systemClock: Clock = {
   now: () => new Date(),
 };
 
-/** Creates a fixed clock for tests: `now()` always returns the same instant. */
+/** Crea un reloj fijo para tests: `now()` siempre devuelve el mismo instante. */
 export function createFixedClock(fixedDate: Date): Clock {
   return {
     now: () => fixedDate,

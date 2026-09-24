@@ -20,12 +20,16 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "seed:coins": "tsx --env-file-if-exists=.env src/scripts/seedCoins.ts",
-    "job:poll-prices": "tsx --env-file-if-exists=.env src/scripts/pollPricesOnce.ts"
+    "job:poll-prices": "tsx --env-file-if-exists=.env src/scripts/pollPricesOnce.ts",
+    "coins:rebuild-latest": "tsx --env-file-if-exists=.env src/scripts/rebuildLatest.ts",
+    "backfill:history": "tsx --env-file-if-exists=.env src/scripts/backfillHistory.ts",
+    "perf:coins-list": "tsx --env-file-if-exists=.env src/scripts/perf/coinsListPerf.ts"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
     "express": "5.2.1",
+    "express-rate-limit": "8.7.0",
     "helmet": "8.3.0",
     "mongoose": "9.10.1",
     "node-cron": "^4.6.0",

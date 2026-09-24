@@ -3,6 +3,11 @@ import type { Logger } from 'pino';
 import { createCoinGeckoClient } from '../../src/integrations/coingecko/coingecko.client.js';
 import { CoinGeckoError } from '../../src/integrations/coingecko/coingecko.errors.js';
 
+/**
+ * Tests unitarios del cliente de CoinGecko de
+ * `src/integrations/coingecko/coingecko.client.ts`.
+ */
+
 function createFakeLogger(): Logger {
   return {
     error: vi.fn(),
@@ -14,15 +19,24 @@ function createFakeLogger(): Logger {
   } as unknown as Logger;
 }
 
-function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
+function jsonResponse(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
 }
 
 interface ClientTestContext {
   logger: Logger;
   sleep: ReturnType<typeof vi.fn>;
   fetchFn: ReturnType<typeof vi.fn>;
-  createClient: (overrides?: Partial<Parameters<typeof createCoinGeckoClient>[0]>) => ReturnType<typeof createCoinGeckoClient>;
+  createClient: (
+    overrides?: Partial<Parameters<typeof createCoinGeckoClient>[0]>,
+  ) => ReturnType<typeof createCoinGeckoClient>;
 }
 
 function setup(): ClientTestContext {
@@ -271,6 +285,110 @@ describe('createCoinGeckoClient - getSimplePrices', () => {
       ...(ctx.logger.error as ReturnType<typeof vi.fn>).mock.calls,
     ];
     expect(JSON.stringify(allLogCalls)).not.toContain('super-secret-demo-key');
+  });
+});
+
+describe('createCoinGeckoClient - getMarketChart', () => {
+  let ctx: ClientTestContext;
+
+  beforeEach(() => {
+    ctx = setup();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('zips prices/market_caps/total_volumes by index into points', async () => {
+    ctx.fetchFn.mockResolvedValueOnce(
+      jsonResponse(200, {
+        prices: [
+          [1_700_000_000_000, 65000],
+          [1_700_003_600_000, 65500],
+        ],
+        market_caps: [
+          [1_700_000_000_000, 1_000_000_000],
+          [1_700_003_600_000, 1_010_000_000],
+        ],
+        total_volumes: [
+          [1_700_000_000_000, 50_000_000],
+          [1_700_003_600_000, 51_000_000],
+        ],
+      }),
+    );
+
+    const client = ctx.createClient();
+    const points = await client.getMarketChart('bitcoin', 1);
+
+    expect(points).toEqual([
+      {
+        timestamp: new Date(1_700_000_000_000),
+        priceUsd: 65000,
+        marketCapUsd: 1_000_000_000,
+        volume24hUsd: 50_000_000,
+      },
+      {
+        timestamp: new Date(1_700_003_600_000),
+        priceUsd: 65500,
+        marketCapUsd: 1_010_000_000,
+        volume24hUsd: 51_000_000,
+      },
+    ]);
+  });
+
+  it('defaults marketCapUsd/volume24hUsd to null when those arrays are absent', async () => {
+    ctx.fetchFn.mockResolvedValueOnce(jsonResponse(200, { prices: [[1_700_000_000_000, 65000]] }));
+
+    const client = ctx.createClient();
+    const points = await client.getMarketChart('bitcoin', 1);
+
+    expect(points).toEqual([
+      {
+        timestamp: new Date(1_700_000_000_000),
+        priceUsd: 65000,
+        marketCapUsd: null,
+        volume24hUsd: null,
+      },
+    ]);
+  });
+
+  it('discards a point whose price is non-positive', async () => {
+    ctx.fetchFn.mockResolvedValueOnce(
+      jsonResponse(200, {
+        prices: [
+          [1_700_000_000_000, 0],
+          [1_700_003_600_000, 65500],
+        ],
+      }),
+    );
+
+    const client = ctx.createClient();
+    const points = await client.getMarketChart('bitcoin', 1);
+
+    expect(points).toHaveLength(1);
+    expect(points[0]?.priceUsd).toBe(65500);
+  });
+
+  it('throws COINGECKO_BAD_RESPONSE when the shape does not match', async () => {
+    ctx.fetchFn.mockResolvedValueOnce(jsonResponse(200, { not: 'a market chart' }));
+
+    const client = ctx.createClient();
+
+    await expect(client.getMarketChart('bitcoin', 1)).rejects.toMatchObject({
+      internalCode: 'COINGECKO_BAD_RESPONSE',
+    });
+  });
+
+  it('never chunks: one request regardless of days', async () => {
+    ctx.fetchFn.mockResolvedValueOnce(jsonResponse(200, { prices: [] }));
+
+    const client = ctx.createClient();
+    await client.getMarketChart('bitcoin', 90);
+
+    expect(ctx.fetchFn).toHaveBeenCalledTimes(1);
+    const url = (ctx.fetchFn.mock.calls[0] as [string])[0];
+    expect(url).toContain('/coins/bitcoin/market_chart');
+    expect(decodeURIComponent(url)).toContain('days=90');
   });
 });
 

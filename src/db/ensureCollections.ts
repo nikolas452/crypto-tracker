@@ -4,6 +4,12 @@ import { config, type Config } from '../config/env.js';
 import { CoinModel } from '../modules/coins/coins.model.js';
 import { JobRunModel } from '../modules/job-runs/job-runs.model.js';
 
+/**
+ * Garantiza, al arrancar, que las colecciones de Mongo tengan la forma
+ * esperada: crea `price_snapshots` como colección de series temporales si
+ * hace falta y construye los índices de dominio explícitamente.
+ */
+
 const PRICE_SNAPSHOTS_COLLECTION = 'price_snapshots';
 const TIME_FIELD = 'timestamp';
 const META_FIELD = 'meta';
@@ -37,9 +43,10 @@ async function findCollectionInfo(
 }
 
 /**
- * Creates `price_snapshots` as a time-series collection if it doesn't exist
- * yet, or validates the shape of an existing one — never lets an implicit
- * insert create it as a normal collection first (RF-1.1 / price-snapshot-store spec).
+ * Crea `price_snapshots` como colección de series temporales si todavía no
+ * existe, o valida la forma de una existente — nunca deja que un insert
+ * implícito la cree primero como colección normal (RF-1.1 / spec
+ * price-snapshot-store).
  */
 async function ensurePriceSnapshotsCollection(
   db: mongoose.mongo.Db,
@@ -75,9 +82,9 @@ async function ensurePriceSnapshotsCollection(
           'restart so it can be recreated correctly, or migrate its data manually first.',
       );
       process.exit(1);
-      // `process.exit` never returns in a real process; this guards the case
-      // where a test mocks it and execution would otherwise fall through
-      // into code that assumes a valid time-series collection.
+      // `process.exit` nunca retorna en un proceso real; esto cubre el caso
+      // en que un test lo mockea y la ejecución, de lo contrario, seguiría
+      // hacia código que asume una colección de series temporales válida.
       return;
     }
 
@@ -107,19 +114,21 @@ async function ensurePriceSnapshotsCollection(
 }
 
 /**
- * `coins` and `job_runs` are normal collections, so there's no "wrong shape"
- * risk — but `connectDb()` disables Mongoose's `autoIndex` in production, so
- * their indexes (including job_runs' TTL index) must be built explicitly at
- * startup instead of relying on Mongoose's on-connect background build.
+ * `coins` y `job_runs` son colecciones normales, así que no hay riesgo de
+ * "forma incorrecta" — pero `connectDb()` deshabilita el `autoIndex` de
+ * Mongoose en producción, así que sus índices (incluido el índice TTL de
+ * job_runs) deben construirse explícitamente al arrancar, en lugar de
+ * depender de la construcción en segundo plano de Mongoose al conectar.
  */
 async function ensureDomainIndexes(): Promise<void> {
   await Promise.all([CoinModel.createIndexes(), JobRunModel.createIndexes()]);
 }
 
 /**
- * Runs at startup for every entrypoint that could be first to touch Mongo
- * (API, worker, seed script, manual-run script) — always immediately after
- * `connectDb()`, before anything else touches the database.
+ * Se ejecuta al arrancar en todo entrypoint que pueda ser el primero en
+ * tocar Mongo (API, worker, script de seed, script de ejecución manual) —
+ * siempre inmediatamente después de `connectDb()`, antes de que cualquier
+ * otra cosa toque la base de datos.
  */
 export async function ensureCollections(
   logger: Logger,

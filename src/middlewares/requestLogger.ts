@@ -3,9 +3,10 @@ import type { Logger } from 'pino';
 import { readRequestId } from './requestId.js';
 
 /**
- * Request logging middleware built on `pino-http`, reusing the id already
- * assigned by the `requestId` middleware (mounted before this one). Logs
- * method, route, status and duration; never logs bodies or headers.
+ * Middleware de logging de requests construido sobre `pino-http`, que
+ * reutiliza el id ya asignado por el middleware `requestId` (montado antes
+ * que este). Loguea método, ruta, status y duración; nunca loguea bodies ni
+ * headers.
  */
 export function createRequestLogger(logger: Logger) {
   return pinoHttp({

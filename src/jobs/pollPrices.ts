@@ -51,11 +51,12 @@ function toJobRunError(caught: unknown): JobRunError {
 }
 
 /**
- * Factory for the `poll-prices` job (RF-1.4). The returned `run()` function
- * has NO knowledge of any scheduler, overlap guard or cron — `worker.ts` is
- * the only module that knows about those. `run()` never throws: any
- * exception is caught, closes the run as `failed`, and is logged with its
- * stack here (the `JobRun` document itself never gets a stack or a secret).
+ * Factory del job `poll-prices` (RF-1.4). La función `run()` devuelta NO
+ * tiene conocimiento de ningún scheduler, guarda de solapamiento o cron —
+ * `worker.ts` es el único módulo que sabe de eso. `run()` nunca lanza una
+ * excepción: cualquier excepción se captura, cierra la corrida como
+ * `failed`, y se loguea con su stack acá (el documento `JobRun` en sí nunca
+ * recibe un stack ni un secreto).
  */
 export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJob {
   const { coinsRepo, snapshotsRepo, jobRunsRepo, coingecko, clock, logger, workerId } = deps;
@@ -66,11 +67,20 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
 
       let runId: Types.ObjectId;
       try {
-        runId = await jobRunsRepo.createRunning({ jobName: JOB_NAME, trigger, startedAt, workerId });
+        runId = await jobRunsRepo.createRunning({
+          jobName: JOB_NAME,
+          trigger,
+          startedAt,
+          workerId,
+        });
       } catch (caught) {
-        // Can't even open a JobRun document (e.g. Mongo unreachable). There's
-        // nothing to close, but `run()` must still never throw.
-        logger.error({ err: caught, jobName: JOB_NAME, trigger }, 'poll-prices: failed to create the JobRun document');
+        // Ni siquiera se pudo abrir un documento JobRun (por ejemplo, Mongo
+        // inalcanzable). No hay nada que cerrar, pero `run()` igual nunca
+        // debe lanzar una excepción.
+        logger.error(
+          { err: caught, jobName: JOB_NAME, trigger },
+          'poll-prices: failed to create the JobRun document',
+        );
         const finishedAt = clock.now();
         return {
           runId: new Types.ObjectId(),
@@ -83,7 +93,10 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
         };
       }
 
-      logger.info({ runId: runId.toString(), jobName: JOB_NAME, trigger }, 'poll-prices run started');
+      logger.info(
+        { runId: runId.toString(), jobName: JOB_NAME, trigger },
+        'poll-prices run started',
+      );
 
       async function closeRun(
         status: Exclude<JobStatus, 'running'>,
@@ -95,11 +108,19 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
         const durationMs = finishedAt.getTime() - startedAt.getTime();
 
         try {
-          await jobRunsRepo.closeRun(runId, { status, finishedAt, durationMs, stats, error, skipReason });
+          await jobRunsRepo.closeRun(runId, {
+            status,
+            finishedAt,
+            durationMs,
+            stats,
+            error,
+            skipReason,
+          });
         } catch (persistError) {
-          // RF-1.4 edge case: if Mongo can't be written to at all, the
-          // document is left "running" for RF-1.6's stale-run recovery to
-          // reconcile on the next startup — but `run()` still never throws.
+          // Caso límite de RF-1.4: si no se le puede escribir nada a Mongo,
+          // el documento queda en "running" para que la recuperación de
+          // corridas obsoletas de RF-1.6 lo reconcilie en el próximo
+          // arranque — pero `run()` igual nunca lanza una excepción.
           logger.error(
             { runId: runId.toString(), err: persistError },
             'poll-prices: failed to persist the run closure; it will be recovered as stale on next startup',
@@ -139,7 +160,8 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
           const lastSourceUpdatedAt = lastUpdatedByCoingeckoId.get(coin.coingeckoId) ?? null;
           const newSourceUpdatedAt = price.sourceUpdatedAt;
           const bothKnown = lastSourceUpdatedAt !== null && newSourceUpdatedAt !== null;
-          const unchanged = bothKnown && lastSourceUpdatedAt.getTime() === newSourceUpdatedAt.getTime();
+          const unchanged =
+            bothKnown && lastSourceUpdatedAt.getTime() === newSourceUpdatedAt.getTime();
 
           if (unchanged) {
             skippedUnchanged += 1;
@@ -167,6 +189,40 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
           );
         }
 
+        // Actualiza coins.latest para cada moneda que obtuvo un snapshot
+        // nuevo en esta corrida (spec price-polling-job). Un bulkWrite
+        // fallido degrada la corrida a `partial` en lugar de hacerla
+        // fallar: los snapshots de arriba ya son durables, y `latest` es un
+        // caché que la próxima corrida reconstruye.
+        let latestUpdated = 0;
+        let latestUpdateError: JobRunError | null = null;
+
+        if (docsToInsert.length > 0) {
+          try {
+            const refreshResult = await coinsRepo.refreshLatest(
+              docsToInsert.map((doc) => ({
+                coinId: doc.coinId,
+                priceUsd: doc.priceUsd,
+                marketCapUsd: doc.marketCapUsd,
+                volume24hUsd: doc.volume24hUsd,
+                change24hPct: doc.change24hPct,
+                capturedAt: doc.timestamp,
+                sourceUpdatedAt: doc.sourceUpdatedAt,
+              })),
+            );
+            latestUpdated = refreshResult.modifiedCount;
+          } catch (caught) {
+            logger.error(
+              { runId: runId.toString(), err: caught },
+              'poll-prices: failed to refresh coins.latest; snapshots already inserted are kept',
+            );
+            latestUpdateError = {
+              code: 'LATEST_UPDATE_FAILED',
+              message: 'Failed to refresh coins.latest after inserting snapshots',
+            };
+          }
+        }
+
         const stats: JobRunStats = {
           coinsRequested: activeCoins.length,
           coinsReturned: prices.size,
@@ -174,17 +230,30 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
           skippedUnchanged,
           missingCoins,
           upstreamAttempts: attempts,
+          latestUpdated,
         };
 
         const allMissing = missingCoins.length === activeCoins.length;
-        const status = missingCoins.length === 0 ? 'success' : allMissing ? 'failed' : 'partial';
-        const error: JobRunError | null = allMissing
-          ? { code: 'COINGECKO_NO_COINS_RETURNED', message: 'CoinGecko returned none of the requested coins' }
+        let status: Exclude<JobStatus, 'running'> =
+          missingCoins.length === 0 ? 'success' : allMissing ? 'failed' : 'partial';
+        let error: JobRunError | null = allMissing
+          ? {
+              code: 'COINGECKO_NO_COINS_RETURNED',
+              message: 'CoinGecko returned none of the requested coins',
+            }
           : null;
+
+        if (latestUpdateError && status !== 'failed') {
+          status = 'partial';
+          error = latestUpdateError;
+        }
 
         return await closeRun(status, stats, error);
       } catch (caught) {
-        logger.error({ runId: runId.toString(), err: caught }, 'poll-prices run failed with an unexpected error');
+        logger.error(
+          { runId: runId.toString(), err: caught },
+          'poll-prices run failed with an unexpected error',
+        );
         return await closeRun('failed', { ...EMPTY_JOB_RUN_STATS }, toJobRunError(caught));
       }
     },

@@ -9,6 +9,11 @@ import { config } from '../../src/config/env.js';
 
 const silentLogger = pino({ level: 'silent' });
 
+/**
+ * Tests de integración de `ensureCollections` de `src/db/ensureCollections.ts`
+ * y de la unicidad de `coingeckoId` a nivel de base de datos.
+ */
+
 describe('ensureCollections (integration)', () => {
   beforeAll(async () => {
     await startInMemoryMongo();
@@ -22,7 +27,7 @@ describe('ensureCollections (integration)', () => {
     await stopInMemoryMongo();
   });
 
-  // E1-3: first-ever startup creates price_snapshots as a time-series collection.
+  // E1-3: el primer arranque crea price_snapshots como colección time-series.
   it('E1-3: creates price_snapshots as a time-series collection when it does not exist', async () => {
     const db = mongoose.connection.db;
     if (!db) throw new Error('no db connection');
@@ -57,7 +62,7 @@ describe('ensureCollections (integration)', () => {
     expect(hasSecondaryIndex).toBe(true);
   });
 
-  // E1-4: an existing normal collection with the same name fails fast.
+  // E1-4: una colección normal ya existente con el mismo nombre falla rápido.
   it('E1-4: exits with code 1 when price_snapshots exists as a normal collection', async () => {
     const db = mongoose.connection.db;
     if (!db) throw new Error('no db connection');

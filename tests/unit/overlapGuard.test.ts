@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createOverlapGuard } from '../../src/lib/overlapGuard.js';
 
+/** Tests unitarios de la guarda de solapamiento `createOverlapGuard` de `src/lib/overlapGuard.ts`. */
+
 describe('createOverlapGuard', () => {
   // E1-10
   it('E1-10: a concurrent invocation is skipped (onOverlap) while the first is still in progress', async () => {

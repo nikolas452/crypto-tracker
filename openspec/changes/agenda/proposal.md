@@ -23,6 +23,7 @@ Moving the schedule into MongoDB with Agenda fixes all three and turns "what is 
 ## Capabilities
 
 ### New Capabilities
+
 - `agenda-scheduler`: `createAgenda({ db, role })` — the shared-connection backend, `processEvery`, `maxConcurrency`, `defaultConcurrency`, and the producer/consumer split that guarantees the API never processes a job.
 - `agenda-job-definitions`: the three job definitions with their concurrency, lock and priority settings, UTC evaluation of cron expressions, idempotent `every()` registration, and removal of recurring documents whose names are no longer defined.
 - `lease-lock`: `src/lib/lease-lock.ts` — `acquire`/`renew`/`release` over a `job_locks` document per resource, the atomic conditional upsert, the refusal to release another owner's lock, and the reason `send-notifications` deliberately does not need it.
@@ -33,6 +34,7 @@ Moving the schedule into MongoDB with Agenda fixes all three and turns "what is 
 - `admin-jobs-api`: `GET /api/v1/admin/jobs`, `POST /api/v1/admin/jobs/:name/run` returning 202, `POST /api/v1/admin/jobs/:name/disable` and `/enable`, with the per-job trigger rate limit.
 
 ### Modified Capabilities
+
 - `worker-process`: the entrypoint now creates Agenda as a consumer, registers definitions, cleans obsolete recurring jobs, calls `agenda.start()`, optionally enqueues a startup run through the lease, and shuts down with `agenda.drain(timeout)` falling back to `agenda.stop()`; the in-memory `isRunning` guards and the `node-cron` scheduling are removed.
 - `job-run-tracking`: `trigger` gains `agenda`, `retry` and `api`; `skipReason` gains `locked`; and the document gains `agendaJobId` (string or null) and `attempt` (integer, default 1).
 - `manual-job-run`: the manual script now acquires the same lease as the worker, so it skips instead of colliding — resolving the overlap limitation documented in stage 1.
