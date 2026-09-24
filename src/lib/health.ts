@@ -1,8 +1,13 @@
 import mongoose from 'mongoose';
 
 /**
- * Extensible readiness check contract. Later stages append entries here
- * (Redis, SMTP, ...) without rewriting `GET /health/ready`.
+ * Chequeos de disponibilidad ("readiness") usados por `GET /health/ready`,
+ * incluyendo el chequeo de conexión a MongoDB.
+ */
+
+/**
+ * Contrato extensible para chequeos de disponibilidad. Etapas posteriores
+ * agregan entradas acá (Redis, SMTP, ...) sin reescribir `GET /health/ready`.
  */
 export interface ReadinessCheck {
   readonly name: string;
@@ -24,7 +29,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 
 const MONGO_PING_TIMEOUT_MS = 2000;
 
-/** Readiness check for MongoDB: connection must be open, and a ping must succeed within 2s. */
+/** Chequeo de disponibilidad para MongoDB: la conexión debe estar abierta y un ping debe responder en menos de 2s. */
 export function createMongoReadinessCheck(
   connection: mongoose.Connection = mongoose.connection,
 ): ReadinessCheck {

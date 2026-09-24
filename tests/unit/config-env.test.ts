@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { assertCoinGeckoApiKey, EnvValidationError, parseEnv } from '../../src/config/env.js';
 
+/** Tests unitarios de `parseEnv` y `assertCoinGeckoApiKey` de `src/config/env.ts`. */
+
 describe('parseEnv', () => {
   it('returns a fully-typed config with defaults applied for a valid source', () => {
     const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
@@ -22,6 +24,10 @@ describe('parseEnv', () => {
       JOB_RUNS_RETENTION_DAYS: 30,
       STALE_RUN_THRESHOLD_MIN: 15,
       WORKER_SHUTDOWN_TIMEOUT_MS: 30000,
+      TRUST_PROXY: 0,
+      RATE_LIMIT_MAX: 300,
+      RATE_LIMIT_WINDOW_MIN: 15,
+      STALE_POLL_THRESHOLD_MIN: 30,
     });
   });
 
@@ -30,7 +36,7 @@ describe('parseEnv', () => {
 
     expect(Object.isFrozen(config)).toBe(true);
     expect(() => {
-      // @ts-expect-error intentional mutation attempt on a readonly config
+      // @ts-expect-error intento de mutación deliberado sobre una config de solo lectura
       config.PORT = 9999;
     }).toThrow();
   });
@@ -182,6 +188,57 @@ describe('parseEnv', () => {
   it('rejects a COINGECKO_MAX_IDS_PER_CALL outside 1-250', () => {
     expect(() =>
       parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', COINGECKO_MAX_IDS_PER_CALL: '0' }),
+    ).toThrow(EnvValidationError);
+  });
+
+  it('defaults TRUST_PROXY to 0 in development', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.TRUST_PROXY).toBe(0);
+  });
+
+  it('defaults TRUST_PROXY to 1 in production', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', NODE_ENV: 'production' });
+
+    expect(config.TRUST_PROXY).toBe(1);
+  });
+
+  it('honors an explicit TRUST_PROXY over the NODE_ENV-derived default', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      NODE_ENV: 'production',
+      TRUST_PROXY: '2',
+    });
+
+    expect(config.TRUST_PROXY).toBe(2);
+  });
+
+  it('defaults RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MIN and STALE_POLL_THRESHOLD_MIN', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.RATE_LIMIT_MAX).toBe(300);
+    expect(config.RATE_LIMIT_WINDOW_MIN).toBe(15);
+    expect(config.STALE_POLL_THRESHOLD_MIN).toBe(30);
+  });
+
+  it('leaves ADMIN_API_KEY undefined when not provided', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.ADMIN_API_KEY).toBeUndefined();
+  });
+
+  it('accepts an ADMIN_API_KEY of at least 32 characters', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      ADMIN_API_KEY: 'a'.repeat(32),
+    });
+
+    expect(config.ADMIN_API_KEY).toBe('a'.repeat(32));
+  });
+
+  it('rejects an ADMIN_API_KEY shorter than 32 characters', () => {
+    expect(() =>
+      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', ADMIN_API_KEY: 'too-short' }),
     ).toThrow(EnvValidationError);
   });
 });

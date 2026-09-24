@@ -15,7 +15,7 @@ El worker ya inserta snapshots en `price_snapshots` y registra `job_runs`. Todav
 - **Query params:** parámetros en la URL (`?page=2&limit=20`). Llegan siempre como string, así que hay que validarlos y convertirlos.
 - **Paginación por offset (page/limit):** se salta `(page - 1) × limit` documentos. Es simple y sirve para listas chicas. Con millones de filas se vuelve lenta y se usa **paginación por cursor** (continuar desde el último elemento visto). Acá alcanza con offset; el cursor se menciona para que conozcas la alternativa.
 - **Aggregation pipeline:** secuencia de etapas (`$match`, `$sort`, `$group`, `$project`...) que Mongo ejecuta dentro de la base. Cada etapa recibe los documentos de la anterior. Así se calculan promedios o agrupaciones sin traer todos los datos a Node.
-- **`$dateTrunc`:** redondea una fecha hacia abajo a una unidad (hora, día). Sirve para agrupar puntos en *buckets* de tiempo.
+- **`$dateTrunc`:** redondea una fecha hacia abajo a una unidad (hora, día). Sirve para agrupar puntos en _buckets_ de tiempo.
 - **OHLC (open, high, low, close):** para cada bucket, el primer precio, el máximo, el mínimo y el último. Es el formato estándar de los gráficos de velas.
 - **`$setWindowFields`:** calcula valores sobre una ventana de documentos vecinos. Acá se usa para la media móvil.
 - **Desnormalización ("foto histórica vs entidad viva"):** los snapshots son fotos inmutables del pasado. El último precio es estado vivo que cambia todo el tiempo. Guardar una copia del último precio dentro de `coins` evita consultar la serie temporal en cada request de la lista. El costo es mantener esa copia actualizada, y durante un instante puede diferir del último snapshot (**consistencia eventual**).
@@ -28,6 +28,7 @@ El worker ya inserta snapshots en `price_snapshots` y registra `job_runs`. Todav
 ## 4. Alcance
 
 **Incluye**
+
 - Campo desnormalizado `latest` en `coins`, actualizado por el job.
 - `GET /api/v1/coins`, `GET /api/v1/coins/:coingeckoId`, `GET /api/v1/coins/:coingeckoId/history` y `GET /api/v1/coins/:coingeckoId/stats`.
 - `GET /api/v1/status`.
@@ -36,6 +37,7 @@ El worker ya inserta snapshots en `price_snapshots` y registra `job_runs`. Todav
 - Script opcional de backfill de histórico.
 
 **No incluye**
+
 - Autenticación de usuarios (etapa 3).
 - Escritura de monedas desde la API (etapa 4, admin).
 - Paginación por cursor (solo se documenta).
@@ -43,28 +45,31 @@ El worker ya inserta snapshots en `price_snapshots` y registra `job_runs`. Todav
 ## 5. Cambios al modelo y al job
 
 ### RF-2.1 Campo `latest` en `coins`
+
 Se agrega a `coins`:
 
-| Campo | Tipo |
-| --- | --- |
-| `latest.priceUsd` | number |
-| `latest.marketCapUsd` | number \| null |
-| `latest.volume24hUsd` | number \| null |
-| `latest.change24hPct` | number \| null |
-| `latest.capturedAt` | Date |
-| `latest.sourceUpdatedAt` | Date \| null |
-| `nameLower` | string (para búsqueda) |
+| Campo                    | Tipo                   |
+| ------------------------ | ---------------------- |
+| `latest.priceUsd`        | number                 |
+| `latest.marketCapUsd`    | number \| null         |
+| `latest.volume24hUsd`    | number \| null         |
+| `latest.change24hPct`    | number \| null         |
+| `latest.capturedAt`      | Date                   |
+| `latest.sourceUpdatedAt` | Date \| null           |
+| `nameLower`              | string (para búsqueda) |
 
 - `latest` es `null` hasta el primer snapshot.
 - `nameLower` se calcula en un hook `pre('save')` y también en el upsert del seed.
 
 Índices nuevos:
+
 - `{ isActive: 1, "latest.marketCapUsd": -1 }`
 - `{ isActive: 1, nameLower: 1 }`
 - `{ isActive: 1, symbol: 1 }`
 - `{ isActive: 1, "latest.change24hPct": -1 }`
 
 ### RF-2.2 El job actualiza `latest`
+
 - Después del `insertMany` de RF-1.4, el job ejecuta **un** `bulkWrite` con un `updateOne` por moneda que tuvo snapshot nuevo, haciendo `$set` de `latest`.
 - Condición de cada update: `latest.capturedAt` no existe o es menor que el nuevo `capturedAt`. Así, una ejecución vieja que termina tarde nunca pisa un dato más nuevo.
 - Si el `bulkWrite` falla, el run queda `partial` con `error.code: LATEST_UPDATE_FAILED`. Los snapshots ya insertados se conservan y el siguiente run corrige `latest`.
@@ -77,13 +82,13 @@ Se agrega a `coins`:
 
 **Query params**
 
-| Param | Tipo | Default | Reglas |
-| --- | --- | --- | --- |
-| `page` | int | 1 | ≥ 1 |
-| `limit` | int | 20 | 1–100 |
-| `sort` | enum `marketCap` \| `name` \| `symbol` \| `change24h` | `marketCap` | — |
-| `order` | enum `asc` \| `desc` | `desc` para `marketCap` y `change24h`; `asc` para `name` y `symbol` | — |
-| `q` | string | — | 1–50 caracteres. Busca por **prefijo** en `symbol` o `nameLower`, sin distinguir mayúsculas. |
+| Param   | Tipo                                                  | Default                                                             | Reglas                                                                                       |
+| ------- | ----------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `page`  | int                                                   | 1                                                                   | ≥ 1                                                                                          |
+| `limit` | int                                                   | 20                                                                  | 1–100                                                                                        |
+| `sort`  | enum `marketCap` \| `name` \| `symbol` \| `change24h` | `marketCap`                                                         | —                                                                                            |
+| `order` | enum `asc` \| `desc`                                  | `desc` para `marketCap` y `change24h`; `asc` para `name` y `symbol` | —                                                                                            |
+| `q`     | string                                                | —                                                                   | 1–50 caracteres. Busca por **prefijo** en `symbol` o `nameLower`, sin distinguir mayúsculas. |
 
 - No se aceptan query params desconocidos: responde 400 (esquema Zod `strict`).
 - Solo devuelve monedas con `isActive: true`.
@@ -92,6 +97,7 @@ Se agrega a `coins`:
 - Se hace **una** consulta para los datos y **una** para el `total` (`countDocuments` con el mismo filtro). No se usa `$lookup` a la serie temporal.
 
 **Respuesta 200**
+
 ```json
 {
   "data": [
@@ -115,6 +121,7 @@ Se agrega a `coins`:
 **Headers:** `Cache-Control: public, max-age=60`.
 
 ### RF-2.4 `GET /api/v1/coins/:coingeckoId`
+
 - `coingeckoId` se valida con la misma regex que el modelo. Si no pasa, responde 400.
 - Si no existe o está inactiva, responde 404 `NOT_FOUND`.
 - 200: `{ "data": { coingeckoId, symbol, name, latest, trackedSince } }`, donde `trackedSince` es el `createdAt` de la moneda.
@@ -124,26 +131,27 @@ Se agrega a `coins`:
 
 **Query params**
 
-| Param | Tipo | Default | Reglas |
-| --- | --- | --- | --- |
-| `from` | ISO datetime | `to - 7 días` | Debe ser menor que `to` |
-| `to` | ISO datetime | ahora | No puede estar más de 5 min en el futuro |
-| `interval` | enum `raw` \| `1h` \| `1d` | automático | Ver reglas |
-| `sma` | int | — | 2–200. Solo con `1h` o `1d`. |
+| Param      | Tipo                       | Default       | Reglas                                   |
+| ---------- | -------------------------- | ------------- | ---------------------------------------- |
+| `from`     | ISO datetime               | `to - 7 días` | Debe ser menor que `to`                  |
+| `to`       | ISO datetime               | ahora         | No puede estar más de 5 min en el futuro |
+| `interval` | enum `raw` \| `1h` \| `1d` | automático    | Ver reglas                               |
+| `sma`      | int                        | —             | 2–200. Solo con `1h` o `1d`.             |
 
 **Intervalo automático:** si el rango es ≤ 2 días, `raw`; si es ≤ 30 días, `1h`; si es mayor, `1d`.
 
 **Rango máximo por intervalo:**
 
 | Intervalo | Rango máximo |
-| --- | --- |
-| `raw` | 7 días |
-| `1h` | 90 días |
-| `1d` | 365 días |
+| --------- | ------------ |
+| `raw`     | 7 días       |
+| `1h`      | 90 días      |
+| `1d`      | 365 días     |
 
 Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un intervalo más grueso.
 
 **Implementación**
+
 - `raw`: `find` por `meta.coingeckoId` y rango de `timestamp`, ordenado ascendente, con proyección de campos. Tope de 2.000 puntos; si hay más, 400 sugiriendo `1h`.
 - `1h` / `1d`: pipeline de agregación:
   1. `$match` por moneda y rango.
@@ -154,6 +162,7 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
 - Los buckets sin datos **no** se rellenan.
 
 **Respuesta 200**
+
 ```json
 {
   "data": {
@@ -162,16 +171,27 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
     "from": "2026-09-09T21:30:00.000Z",
     "to": "2026-09-16T21:30:00.000Z",
     "points": [
-      { "t": "2026-09-09T22:00:00.000Z", "open": 1, "high": 2, "low": 0.5, "close": 1.5, "avg": 1.2, "samples": 6, "sma": null }
+      {
+        "t": "2026-09-09T22:00:00.000Z",
+        "open": 1,
+        "high": 2,
+        "low": 0.5,
+        "close": 1.5,
+        "avg": 1.2,
+        "samples": 6,
+        "sma": null
+      }
     ]
   }
 }
 ```
+
 - Con `raw`, cada punto es `{ t, priceUsd, marketCapUsd, volume24hUsd, change24hPct }`.
 - Una moneda existente sin datos en el rango responde 200 con `points: []`. Una moneda inexistente responde 404.
 - `Cache-Control: public, max-age=60`.
 
 ### RF-2.6 `GET /api/v1/coins/:coingeckoId/stats`
+
 - `range`: enum `24h` | `7d` | `30d` | `90d`, default `24h`.
 - Un solo pipeline que calcula, dentro del rango: `open` (primer precio), `close` (último), `min`, `max`, `avg`, `samples`, `firstAt` y `lastAt`.
 - `changePct = (close - open) / open × 100`, redondeado a 4 decimales en la respuesta.
@@ -179,8 +199,10 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
 - 200: `{ "data": { coingeckoId, range, from, to, open, close, changePct, min, max, avg, samples, firstAt, lastAt } }`.
 
 ### RF-2.7 `GET /api/v1/status`
+
 - Público. Sirve para saber, desde afuera, si el worker funciona.
 - Respuesta 200:
+
 ```json
 {
   "data": {
@@ -194,12 +216,14 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
   }
 }
 ```
+
 - `lastSuccessAt` es el `finishedAt` del último run en `success` o `partial`.
 - `stale` es `true` si no hubo éxito en los últimos `STALE_POLL_THRESHOLD_MIN` minutos (default 30) o si nunca hubo uno.
 - No incluye mensajes de error ni datos internos.
 - `Cache-Control: no-store`.
 
 ### RF-2.8 Endpoints de admin (protección temporal)
+
 - Middleware `requireAdminKey`:
   - Lee el header `X-Admin-Key` y lo compara con `ADMIN_API_KEY` usando `crypto.timingSafeEqual` (si las longitudes difieren, se considera distinto sin llamar a la función).
   - Si falta o no coincide, responde 401 `UNAUTHENTICATED`.
@@ -215,6 +239,7 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
 - En la etapa 3 esta protección se reemplaza por usuario autenticado con rol `admin`.
 
 ### RF-2.9 Rate limiting y proxy
+
 - `app.set('trust proxy', config.TRUST_PROXY)`. `TRUST_PROXY` es entero, con default 0 en desarrollo y 1 en producción.
 - `express-rate-limit` 8.x global sobre `/api`: `RATE_LIMIT_MAX` requests (default 300) por ventana de `RATE_LIMIT_WINDOW_MIN` minutos (default 15) por IP.
   - Con las cabeceras estándar `RateLimit-*` habilitadas y las `X-RateLimit-*` deshabilitadas (confirmar el nombre exacto de la opción en la versión instalada).
@@ -223,10 +248,12 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
 - Store en memoria. Queda documentado que con más de una instancia de la API haría falta un store compartido, como Redis (etapa 8).
 
 ### RF-2.10 Caché HTTP
+
 - Express genera `ETag` débil por defecto. Se verifica que un `If-None-Match` igual responda 304.
 - Las cabeceras `Cache-Control` son las indicadas en cada endpoint.
 
 ### RF-2.11 (Opcional) Backfill de histórico
+
 - Script `npm run backfill:history -- bitcoin --days 30`.
 - Usa `GET /coins/{id}/market_chart?vs_currency=usd&days=N` de CoinGecko. Verificá antes en la documentación si el plan Demo incluye este endpoint y con qué granularidad responde según los días pedidos.
 - Inserta en `price_snapshots` con `timestamp` = la marca de cada punto y `sourceUpdatedAt` igual a ese mismo valor.
@@ -246,13 +273,13 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
 
 ## 8. Variables de entorno nuevas
 
-| Variable | Default | Uso |
-| --- | --- | --- |
-| `TRUST_PROXY` | 0 (dev) / 1 (prod) | — |
-| `RATE_LIMIT_MAX` | 300 | — |
-| `RATE_LIMIT_WINDOW_MIN` | 15 | — |
-| `STALE_POLL_THRESHOLD_MIN` | 30 | — |
-| `ADMIN_API_KEY` | — | Opcional. Si está, mínimo 32 caracteres. Se genera con `openssl rand -hex 32`. |
+| Variable                   | Default            | Uso                                                                            |
+| -------------------------- | ------------------ | ------------------------------------------------------------------------------ |
+| `TRUST_PROXY`              | 0 (dev) / 1 (prod) | —                                                                              |
+| `RATE_LIMIT_MAX`           | 300                | —                                                                              |
+| `RATE_LIMIT_WINDOW_MIN`    | 15                 | —                                                                              |
+| `STALE_POLL_THRESHOLD_MIN` | 30                 | —                                                                              |
+| `ADMIN_API_KEY`            | —                  | Opcional. Si está, mínimo 32 caracteres. Se genera con `openssl rand -hex 32`. |
 
 ## 9. Casos borde
 
@@ -287,6 +314,7 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
 ## 11. Testing requerido
 
 **Unitarios**
+
 - Esquemas Zod de query: defaults, coerción, rechazos y `strict`.
 - Selección de intervalo automático y validación de rango máximo (función pura).
 - Escape de regex.
@@ -294,12 +322,14 @@ Si se excede, responde 400 `VALIDATION_ERROR` con un mensaje que sugiere un inte
 - `requireAdminKey`: sin header, header incorrecto, longitud distinta, key correcta y key no configurada.
 
 **Integración** (supertest + mongodb-memory-server, con datos sembrados por helpers)
+
 - E2-1 a E2-16.
 - Para E2-7 y E2-10, usar datos fijos con timestamps exactos y resultados esperados escritos a mano en el test.
 - Para E2-6, ejecutar la actualización de `latest` con dos `capturedAt` en orden invertido.
 - Un test que ejecute `explain('executionStats')` sobre la consulta de la lista y verifique que el plan usa `IXSCAN` y no `COLLSCAN`.
 
 **Performance (manual y documentado)**
+
 - Script que siembre 90 días × 10 monedas y mida RNF-2.1 con `autocannon` u otra herramienta similar.
 
 ## 12. Preguntas abiertas

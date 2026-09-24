@@ -1,12 +1,14 @@
 /**
- * Generic in-memory overlap guard: at most one `run` at a time. If a new
- * invocation arrives while a previous one is still in progress, `onOverlap`
- * runs instead and the new invocation is skipped entirely.
+ * Guarda de solapamiento genérica en memoria: como máximo una ejecución de
+ * `run` a la vez. Si llega una nueva invocación mientras la anterior sigue en
+ * curso, se ejecuta `onOverlap` en su lugar y la nueva invocación se omite
+ * por completo.
  *
- * Scheduler-agnostic and job-agnostic on purpose: `worker.ts` is the only
- * caller (RF-1.5 / design.md — "overlap protection is an in-memory flag in
- * worker.ts, not a DB lock, not the job's concern"). Kept in `src/lib/` so it
- * can be unit tested in isolation, without spinning up cron or Mongo.
+ * Deliberadamente agnóstica del scheduler y del job: `worker.ts` es el único
+ * caller (RF-1.5 / design.md — "la protección contra solapamiento es un flag
+ * en memoria en worker.ts, no un lock en la DB, ni responsabilidad del job").
+ * Se mantiene en `src/lib/` para poder testearla en forma aislada, sin
+ * levantar cron ni Mongo.
  */
 export interface OverlapGuardDeps<TTrigger, TResult> {
   readonly run: (trigger: TTrigger) => Promise<TResult>;
@@ -15,14 +17,15 @@ export interface OverlapGuardDeps<TTrigger, TResult> {
 
 export interface OverlapGuard<TTrigger, TResult> {
   /**
-   * Runs `run(trigger)` unless a previous invocation is still in progress —
-   * in which case `onOverlap(trigger)` runs instead and this call resolves
-   * to `undefined` without ever calling `run`. The "in progress" flag is
-   * released in a `finally`, so a thrown/rejected run can't leave it stuck.
+   * Ejecuta `run(trigger)` a menos que una invocación anterior siga en
+   * curso — en cuyo caso se ejecuta `onOverlap(trigger)` en su lugar y esta
+   * llamada resuelve a `undefined` sin llegar a llamar a `run`. El flag "en
+   * curso" se libera en un `finally`, para que una ejecución que lance o
+   * rechace no lo deje trabado.
    */
   runGuarded(trigger: TTrigger): Promise<TResult | undefined>;
   isRunning(): boolean;
-  /** The currently in-progress run's promise, or `null` when idle. */
+  /** La promesa de la ejecución en curso, o `null` cuando está inactiva. */
   currentRun(): Promise<TResult> | null;
 }
 

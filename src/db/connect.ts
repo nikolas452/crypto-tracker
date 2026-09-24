@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
 import type { Logger } from 'pino';
 
+/**
+ * Establece la conexión inicial a MongoDB con reintentos y backoff
+ * exponencial, y registra el logging del ciclo de vida de la conexión.
+ */
+
 const MAX_ATTEMPTS = 5;
 const BACKOFF_MS = [1000, 2000, 4000, 8000] as const;
 
@@ -11,9 +16,10 @@ function sleep(ms: number): Promise<void> {
 let lifecycleListenersRegistered = false;
 
 /**
- * Wires Mongoose connection lifecycle logging exactly once per process:
- * `connected`/`reconnected` at `info`, `disconnected` at `warn`, `error` at
- * `error`. Safe to call multiple times; only registers listeners once.
+ * Conecta el logging del ciclo de vida de la conexión de Mongoose exactamente
+ * una vez por proceso: `connected`/`reconnected` en `info`, `disconnected` en
+ * `warn`, `error` en `error`. Se puede llamar varias veces; solo registra los
+ * listeners una vez.
  */
 function registerLifecycleLogging(logger: Logger): void {
   if (lifecycleListenersRegistered) {
@@ -40,11 +46,12 @@ export interface ConnectDbOptions {
 }
 
 /**
- * Attempts the initial MongoDB connection with up to 5 attempts and
- * exponential backoff (1s/2s/4s/8s). Each failed attempt is logged at `warn`
- * with the attempt number, never the URI. After exhausting all attempts,
- * logs at `fatal` and exits the process with code 1 — the caller (`server.ts`)
- * must never call `listen()` before this resolves successfully.
+ * Intenta la conexión inicial a MongoDB con hasta 5 intentos y backoff
+ * exponencial (1s/2s/4s/8s). Cada intento fallido se loguea en `warn` con el
+ * número de intento, nunca con la URI. Tras agotar todos los intentos,
+ * loguea en `fatal` y termina el proceso con código 1 — el caller
+ * (`server.ts`) nunca debe llamar a `listen()` antes de que esto resuelva
+ * exitosamente.
  */
 export async function connectDb(
   uri: string,
@@ -84,7 +91,7 @@ export async function connectDb(
   process.exit(1);
 }
 
-/** Closes the active Mongoose connection. Used as part of process shutdown. */
+/** Cierra la conexión activa de Mongoose. Se usa como parte del apagado del proceso. */
 export async function disconnectDb(): Promise<void> {
   await mongoose.disconnect();
 }

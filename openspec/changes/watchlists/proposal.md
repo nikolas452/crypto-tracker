@@ -17,6 +17,7 @@
 ## Capabilities
 
 ### New Capabilities
+
 - `watchlist-store`: the `watchlist_items` collection — its fields (`userId`, `coinId`, `note`, `addedAt`, `updatedAt`), the unique compound index on `{ userId, coinId }`, the supporting indexes on `{ userId, addedAt }` and `{ coinId }`, and the `WATCHLIST_MAX_ITEMS` cap.
 - `watchlist-read-api`: `GET /api/v1/me/watchlist` — the `$match`/`$lookup`/`$unwind`/`$sort` aggregation, the four sort options, the deliberate absence of pagination, the display of deactivated coins with their frozen `latest`, the `{ data, meta: { count, max } }` envelope and the `private, no-cache` header.
 - `watchlist-write-api`: `POST` (the fixed validation order producing 400, 404, 422 `LIMIT_REACHED` and 409 `CONFLICT`, plus the `Location` header), `PATCH /:coingeckoId` (note editing, working for deactivated coins) and `DELETE /:coingeckoId` (idempotent 204 even when nothing was deleted).
@@ -25,6 +26,7 @@
 - `account-deletion-cascade`: `usersService.deleteAccount(userId)` — the dependents-before-owner ordering, its idempotence under partial failure, and the rule that each module deletes its own data rather than the users module reaching into foreign collections.
 
 ### Modified Capabilities
+
 - `me-endpoints`: `DELETE /api/v1/me` now delegates to `usersService.deleteAccount(userId)`, which removes the user's watchlist items before the user document.
 - `health-checks`: the readiness check list gains an optional `coingecko` entry, disabled by default so an upstream outage cannot take the API out of rotation.
 - `worker-process`: `COINGECKO_API_KEY` is now required by the API entrypoint as well, since the admin coin endpoints call CoinGecko; the previous statement that the API does not need it no longer holds.

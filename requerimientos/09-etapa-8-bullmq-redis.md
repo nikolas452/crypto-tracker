@@ -2,7 +2,7 @@
 
 > Aplica `00-indice-y-convenciones.md`. Requiere las etapas 0 a 7 y, en producción, la **opción A** de la etapa 7 (un worker que corre de forma continua). BullMQ necesita procesos consumidores siempre activos, así que no es compatible con la opción B.
 >
-> **Aviso de versiones:** BullMQ 6.0.0 salió el 2026-07-30 (la última relevada es la 6.3.6). Su `package.json` declara como *peers* opcionales `ioredis`, `redis` y `pg`, lo que sugiere cambios en cómo se configura la conexión. Buena parte de la documentación y los ejemplos públicos son de la v5. **Antes de escribir la spec, leé el changelog y la guía de migración a v6.** Los nombres de API citados acá (`Queue`, `Worker`, `upsertJobScheduler`, `UnrecoverableError`, `removeOnComplete`/`removeOnFail`, `limiter`, `attempts`/`backoff`) salen de la documentación actual de BullMQ y pueden haber cambiado. Los requerimientos están escritos en términos de comportamiento para que sigan valiendo aunque cambie la API.
+> **Aviso de versiones:** BullMQ 6.0.0 salió el 2026-07-30 (la última relevada es la 6.3.6). Su `package.json` declara como _peers_ opcionales `ioredis`, `redis` y `pg`, lo que sugiere cambios en cómo se configura la conexión. Buena parte de la documentación y los ejemplos públicos son de la v5. **Antes de escribir la spec, leé el changelog y la guía de migración a v6.** Los nombres de API citados acá (`Queue`, `Worker`, `upsertJobScheduler`, `UnrecoverableError`, `removeOnComplete`/`removeOnFail`, `limiter`, `attempts`/`backoff`) salen de la documentación actual de BullMQ y pueden haber cambiado. Los requerimientos están escritos en términos de comportamiento para que sigan valiendo aunque cambie la API.
 
 ## 1. Objetivo
 
@@ -15,7 +15,7 @@ Agenda procesa `poll-prices`, `send-notifications` y `maintenance` en Mongo. El 
 ## 3. Conceptos nuevos de la etapa
 
 - **Redis / Valkey:** base de datos clave-valor en memoria, muy rápida. Valkey es un fork open source de Redis 7.2, y es lo que usa hoy Render Key Value.
-- **Persistencia en Redis:** por defecto los datos viven en memoria. Con AOF (*append-only file*) se escriben también a disco. BullMQ recomienda AOF en producción.
+- **Persistencia en Redis:** por defecto los datos viven en memoria. Con AOF (_append-only file_) se escriben también a disco. BullMQ recomienda AOF en producción.
 - **Política de expulsión (`maxmemory-policy`):** qué hace Redis cuando se llena la memoria. BullMQ **exige** `noeviction` (rechazar escrituras en lugar de borrar claves), porque perder claves rompe las colas.
 - **Cola / productor / consumidor:** el productor agrega jobs a la cola (`queue.add`) y los workers (consumidores) los toman y procesan. Varios workers pueden consumir la misma cola en paralelo.
 - **Fan-out:** un job genera muchos jobs más chicos. Por ejemplo, un `poll-prices` genera un `evaluate-alerts` por cada moneda actualizada.
@@ -24,11 +24,12 @@ Agenda procesa `poll-prices`, `send-notifications` y `maintenance` en Mongo. El 
 - **Rate limiter de cola:** limita cuántos jobs por unidad de tiempo procesa la cola en total. Sirve para respetar límites del proveedor SMTP.
 - **Stalled jobs:** jobs que un worker tomó pero dejó de procesar (por ejemplo, porque murió). BullMQ los detecta y los devuelve a la cola.
 - **Dead-letter:** jobs que agotaron sus intentos. En BullMQ quedan en estado `failed` para revisarlos y reintentarlos a mano.
-- **Outbox + relay:** el outbox en Mongo registra *qué* hay que enviar. Un *relay* pasa esos registros a la cola. Si Redis pierde datos, el relay vuelve a encolar lo pendiente a partir de Mongo. Por eso Mongo es la fuente de verdad.
+- **Outbox + relay:** el outbox en Mongo registra _qué_ hay que enviar. Un _relay_ pasa esos registros a la cola. Si Redis pierde datos, el relay vuelve a encolar lo pendiente a partir de Mongo. Por eso Mongo es la fuente de verdad.
 
 ## 4. Alcance
 
 **Incluye**
+
 - Redis/Valkey en local y en producción.
 - Colas `prices`, `alerts`, `notifications` y `maintenance`.
 - Schedulers de BullMQ.
@@ -40,6 +41,7 @@ Agenda procesa `poll-prices`, `send-notifications` y `maintenance` en Mongo. El 
 - Tests contra un Redis real.
 
 **No incluye**
+
 - Flows (dependencias padre-hijo entre jobs), salvo que quieras explorarlos.
 - OpenTelemetry (`bullmq-otel`) (opcional).
 - Redis Cluster o Sentinel.
@@ -58,18 +60,19 @@ Agenda procesa `poll-prices`, `send-notifications` y `maintenance` en Mongo. El 
 
 ## 6. Diseño de colas
 
-| Cola | Job | Productor | Opciones del job | Opciones del worker |
-| --- | --- | --- | --- | --- |
-| `prices` | `poll-prices` | Scheduler (`POLL_PRICES_CRON`), admin | `attempts: 2`, backoff fijo de 2 min, `removeOnComplete` 24 h / 500, `removeOnFail` 7 d | `concurrency: 1` |
-| `alerts` | `evaluate-alerts` (una moneda) | Handler de `poll-prices` | `jobId: eval:<coinId>:<capturedAt epoch>`, `attempts: 3`, backoff exponencial desde 5 s | `concurrency: 5` |
+| Cola            | Job                                    | Productor                                  | Opciones del job                                                                                 | Opciones del worker                                                        |
+| --------------- | -------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `prices`        | `poll-prices`                          | Scheduler (`POLL_PRICES_CRON`), admin      | `attempts: 2`, backoff fijo de 2 min, `removeOnComplete` 24 h / 500, `removeOnFail` 7 d          | `concurrency: 1`                                                           |
+| `alerts`        | `evaluate-alerts` (una moneda)         | Handler de `poll-prices`                   | `jobId: eval:<coinId>:<capturedAt epoch>`, `attempts: 3`, backoff exponencial desde 5 s          | `concurrency: 5`                                                           |
 | `notifications` | `send-notification` (una notificación) | Evaluación de alertas (post-commit), relay | `jobId: notif:<notificationId>`, `attempts: NOTIFY_MAX_ATTEMPTS`, backoff exponencial desde 60 s | `concurrency: 3`, `limiter: { max: MAIL_MAX_PER_MINUTE, duration: 60000 }` |
-| `maintenance` | `maintenance`, `relay-notifications` | Schedulers | `attempts: 1` | `concurrency: 1` |
+| `maintenance`   | `maintenance`, `relay-notifications`   | Schedulers                                 | `attempts: 1`                                                                                    | `concurrency: 1`                                                           |
 
 **Por qué varias colas:** cada tipo de trabajo tiene necesidades distintas de concurrencia, reintentos y límites. Si comparten cola, un pico de emails puede demorar la actualización de precios.
 
 ## 7. Requerimientos funcionales
 
 ### RF-8.1 Infraestructura local
+
 - `docker-compose.yml` suma el servicio `valkey` con la configuración de las decisiones técnicas y el puerto 6379.
 - `REDIS_URL` en `.env.example`.
 - Al arrancar, la API y el worker hacen `PING` y leen `CONFIG GET maxmemory-policy`. Si la política no es `noeviction`:
@@ -78,17 +81,19 @@ Agenda procesa `poll-prices`, `send-notifications` y `maintenance` en Mongo. El 
   - Si el proveedor no permite `CONFIG GET`, se loguea que no se pudo verificar y se continúa.
 
 ### RF-8.2 Schedulers
-- Al arrancar el worker, se hace *upsert* (sin duplicar) de:
+
+- Al arrancar el worker, se hace _upsert_ (sin duplicar) de:
   - `poll-prices` con el patrón `POLL_PRICES_CRON`.
   - `maintenance` con `MAINTENANCE_CRON`.
   - `relay-notifications` cada `RELAY_INTERVAL_MS` (default 120000).
-- Se usa el mecanismo de *job schedulers* de BullMQ (`upsertJobScheduler` en la documentación actual), que reemplaza a los "repeatable jobs".
+- Se usa el mecanismo de _job schedulers_ de BullMQ (`upsertJobScheduler` en la documentación actual), que reemplaza a los "repeatable jobs".
 - Formato de las expresiones cron: BullMQ acepta patrones con campo de segundos opcional. Se mantienen expresiones de 5 campos y se documenta.
 - Reiniciar el worker N veces deja **un** scheduler por ID.
 - Los schedulers cuyo ID ya no está en la configuración se eliminan al arrancar.
 - `send-notifications` por lote deja de existir: lo reemplazan `send-notification` individual y el relay.
 
 ### RF-8.3 `poll-prices` con fan-out
+
 1. Ejecuta la lógica de precios de las etapas 1 y 2. Registra `JobRun` igual que antes.
 2. **No** evalúa alertas en el mismo job. Por cada moneda con snapshot nuevo, agrega un `evaluate-alerts` con `{ coinId, capturedAt, value }` en bloque (`addBulk` o equivalente) y con el `jobId` determinístico.
 3. Si falla el encolado (Redis caído), el run queda `partial` con `error.code: ENQUEUE_FAILED`. Las alertas de esa moneda se evalúan en la corrida siguiente, porque el valor nuevo va a traer otro `capturedAt`.
@@ -96,13 +101,16 @@ Agenda procesa `poll-prices`, `send-notifications` y `maintenance` en Mongo. El 
 5. Exclusión entre workers: con `concurrency: 1` por worker y varios workers, dos `poll-prices` (uno programado y otro manual) podrían correr a la vez. Se mantiene el **lease lock** de la etapa 6. Opcionalmente, se reemplaza por la concurrencia global de la cola si BullMQ 6 la ofrece (en v5, `queue.setGlobalConcurrency`), y la decisión se documenta.
 
 ### RF-8.4 `evaluate-alerts`
+
 - Ejecuta la evaluación de la etapa 5 **para una sola moneda**, con la misma función `decide` y la misma transacción.
 - Ajuste en la transacción: **después** del commit (nunca dentro), agrega `send-notification` con `jobId: notif:<notificationId>`. Si ese `add` falla, la notificación queda `pending` en Mongo y la toma el relay.
 - `stats` por evaluación: se registran en el log del job. Agregar un `JobRun` por moneda es opcional: generaría muchos documentos, así que se sugiere agregarlos a nivel `poll-prices` con un contador en Redis o simplemente con logs.
 - Errores de infraestructura → reintento con backoff.
 
 ### RF-8.5 `send-notification` y relay
+
 **`send-notification`** (una notificación):
+
 1. Claim en Mongo por ID: `findOneAndUpdate({ _id, status: 'pending' }, { $set: { status: 'sending', lockedAt, lockedBy } })`. Si no matchea (ya enviada, cancelada o tomada por otro), termina **sin error**, porque es un duplicado inofensivo.
 2. Envía con el mailer.
 3. Si el envío funciona, marca `sent` (con el filtro `lockedBy`).
@@ -112,6 +120,7 @@ Agenda procesa `poll-prices`, `send-notifications` y `maintenance` en Mongo. El 
 7. El `nextAttemptAt` de Mongo deja de controlar los tiempos. Se mantiene solo como dato informativo.
 
 **`relay-notifications`** (cada 2 min):
+
 1. Busca en Mongo las notificaciones `pending` con `createdAt` o `updatedAt` de hace más de 2 minutos.
 2. Las encola con `jobId: notif:<id>`. Si el job ya existe en la cola, BullMQ lo ignora.
 3. Recupera las `sending` colgadas (misma regla de la etapa 5).
@@ -120,11 +129,14 @@ Agenda procesa `poll-prices`, `send-notifications` y `maintenance` en Mongo. El 
 **Consistencia de reintentos:** cuando un job se reencola por el relay con el mismo ID después de haber fallado, BullMQ podría ignorarlo si el job `failed` sigue guardado. Regla: el reintento manual del admin (RF-8.8) elimina el job fallido antes de reencolar, o usa el mecanismo de "retry" de la cola.
 
 ### RF-8.6 `maintenance`
+
 Mismos pasos que en la etapa 6, reemplazando la limpieza de `agenda_jobs` por:
+
 - Conteo de jobs `failed` por cola en las últimas 24 h (`warn` si es mayor que 0).
 - Limpieza de jobs viejos si `removeOnComplete`/`removeOnFail` no alcanzan (con el método de limpieza de la cola).
 
 ### RF-8.7 Ciclo de vida del worker
+
 - Un solo proceso `worker.ts` crea los 4 workers de BullMQ.
 - Cada `Queue` y cada `Worker` tiene un listener de `error` que loguea en `error`. La guía de producción de BullMQ lo pide explícitamente.
 - Eventos `failed` y `completed` de cada worker → logs (`warn` / `debug`) con `queue`, `jobId`, `attemptsMade` y `error.code`.
@@ -136,7 +148,9 @@ Mismos pasos que en la etapa 6, reemplazando la limpieza de `agenda_jobs` por:
 - Variable `WORKER_QUEUES` (default: todas) para levantar solo algunas colas por proceso. Esto permite, por ejemplo, un worker dedicado a `notifications`.
 
 ### RF-8.8 Admin y visibilidad
+
 Con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`:
+
 - **`GET /api/v1/admin/queues`:** por cola, conteos por estado (`waiting`, `active`, `delayed`, `completed`, `failed`, `paused`) y estado de los schedulers (próxima ejecución).
 - **`POST /api/v1/admin/queues/:queue/pause`** y **`/resume`**.
 - **`POST /api/v1/admin/jobs/:name/run`:** conserva el contrato de la etapa 6 (202). Ahora hace `queue.add` con `jobId: manual:<name>:<minuto actual>`, así dos clics en el mismo minuto no duplican.
@@ -147,10 +161,12 @@ Con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`:
   - Solo sobre HTTPS.
 
 ### RF-8.9 Rate limit de la API con Redis (opcional)
+
 - Si `RATE_LIMIT_STORE=redis`, los limitadores de las etapas 2 y 3 usan `rate-limit-redis` (6.x). Así el límite es compartido entre varias instancias de la API.
-- Si Redis no está disponible, el limitador **deja pasar** los requests (*fail open*) y loguea en `error`. La decisión se documenta: se prioriza disponibilidad sobre protección.
+- Si Redis no está disponible, el limitador **deja pasar** los requests (_fail open_) y loguea en `error`. La decisión se documenta: se prioriza disponibilidad sobre protección.
 
 ### RF-8.10 Migración desde Agenda
+
 1. Desplegar el worker BullMQ con `SCHEDULER=bullmq` y el worker Agenda apagado (**nunca** los dos a la vez sobre los mismos jobs).
 2. Script `npm run migrate:agenda-to-bullmq`:
    - Cancela los jobs de `agenda_jobs`.
@@ -170,20 +186,20 @@ Con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`:
 
 ## 9. Variables de entorno nuevas
 
-| Variable | Default | Uso |
-| --- | --- | --- |
-| `REDIS_URL` | — | Obligatoria con `SCHEDULER=bullmq` |
-| `SCHEDULER` | `bullmq` | Suma el valor `bullmq` a los de la etapa 6 |
-| `WORKER_QUEUES` | `prices,alerts,notifications,maintenance` | — |
-| `RELAY_INTERVAL_MS` | 120000 | — |
-| `BULL_BOARD_ENABLED` | `false` en prod / `true` en dev | — |
-| `BULL_BOARD_USER` / `BULL_BOARD_PASS` | — | Obligatorias si el dashboard está habilitado fuera de desarrollo |
-| `RATE_LIMIT_STORE` | `memory` | `memory` \| `redis` |
+| Variable                              | Default                                   | Uso                                                              |
+| ------------------------------------- | ----------------------------------------- | ---------------------------------------------------------------- |
+| `REDIS_URL`                           | —                                         | Obligatoria con `SCHEDULER=bullmq`                               |
+| `SCHEDULER`                           | `bullmq`                                  | Suma el valor `bullmq` a los de la etapa 6                       |
+| `WORKER_QUEUES`                       | `prices,alerts,notifications,maintenance` | —                                                                |
+| `RELAY_INTERVAL_MS`                   | 120000                                    | —                                                                |
+| `BULL_BOARD_ENABLED`                  | `false` en prod / `true` en dev           | —                                                                |
+| `BULL_BOARD_USER` / `BULL_BOARD_PASS` | —                                         | Obligatorias si el dashboard está habilitado fuera de desarrollo |
+| `RATE_LIMIT_STORE`                    | `memory`                                  | `memory` \| `redis`                                              |
 
 ## 10. Casos borde
 
 - **Redis lleno con `noeviction`:** los `add` fallan. El outbox y el relay evitan perder notificaciones. `poll-prices` queda `partial` con `ENQUEUE_FAILED`. Se alerta por logs.
-- **Mensaje enviado pero el worker muere antes de marcar `sent`:** BullMQ detecta el job como *stalled* y lo reprocesa. El claim ve `sending`, así que no reenvía. El relay lo recupera después del timeout de lock y lo reenvía: duplicado posible (at-least-once, documentado).
+- **Mensaje enviado pero el worker muere antes de marcar `sent`:** BullMQ detecta el job como _stalled_ y lo reprocesa. El claim ve `sending`, así que no reenvía. El relay lo recupera después del timeout de lock y lo reenvía: duplicado posible (at-least-once, documentado).
 - **Notificación cancelada (usuario borrado) con un job ya en la cola:** el claim no matchea y el job termina sin error.
 - **Alerta disparada dos veces por el mismo `capturedAt`:** el `jobId` de `evaluate-alerts` lo deduplica, y el `version` de la alerta lo protege igual.
 - **Cambio de `POLL_PRICES_CRON`:** el upsert del scheduler lo actualiza al reiniciar.

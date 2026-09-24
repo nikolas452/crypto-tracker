@@ -3,14 +3,15 @@ import type { Logger } from 'pino';
 import { z } from 'zod';
 
 /**
- * `src/config/env.ts` is the ONLY module in `src/` allowed to read
- * `process.env` (enforced by the `no-restricted-properties` ESLint rule).
- * Every other module must import the frozen `config` object exported below.
+ * `src/config/env.ts` es el ÚNICO módulo en `src/` autorizado a leer
+ * `process.env` (impuesto por la regla de ESLint `no-restricted-properties`).
+ * Todo otro módulo debe importar el objeto `config` congelado exportado más
+ * abajo.
  */
 
 const PINO_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 
-const envSchema = z.object({
+const baseEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   MONGODB_URI: z
@@ -24,34 +25,61 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(PINO_LEVELS).default('info'),
   SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10000),
 
-  // --- primer-job: CoinGecko client ---
-  // Optional at the schema level so the API process (which doesn't need
-  // CoinGecko until a later stage) can boot without it. Entrypoints that do
-  // need it (worker, seed script, manual-run script) call
-  // `assertCoinGeckoApiKey()` right after loading config to fail fast.
+  // --- primer-job: cliente de CoinGecko ---
+  // Opcional a nivel de schema para que el proceso de la API (que no
+  // necesita CoinGecko hasta una etapa posterior) pueda arrancar sin ella.
+  // Los entrypoints que sí la necesitan (worker, script de seed, script de
+  // ejecución manual) llaman a `assertCoinGeckoApiKey()` justo después de
+  // cargar la config para fallar rápido.
   COINGECKO_API_KEY: z.string().min(1).optional(),
   COINGECKO_BASE_URL: z.string().min(1).default('https://api.coingecko.com/api/v3'),
   COINGECKO_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
   COINGECKO_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
   COINGECKO_MAX_IDS_PER_CALL: z.coerce.number().int().min(1).max(250).default(50),
 
-  // --- primer-job: poll-prices job & worker ---
+  // --- primer-job: job y worker de poll-prices ---
   POLL_PRICES_CRON: z.string().min(1).default('*/10 * * * *'),
   POLL_PRICES_RUN_ON_START: z
     .enum(['true', 'false'])
     .default('true')
     .transform((value) => value === 'true'),
-  // Empty string means "no expiration"; unset falls back to the 90-day
-  // default. Once resolved, `null` means no expiration.
-  SNAPSHOT_RETENTION_DAYS: z.preprocess((value) => {
-    if (value === undefined) return 90;
-    if (typeof value === 'string' && value.trim() === '') return null;
-    return value;
-  }, z.union([z.coerce.number().int().positive(), z.null()])),
+  // Un string vacío significa "sin expiración"; si no está definida, cae al
+  // valor por defecto de 90 días. Una vez resuelto, `null` significa sin
+  // expiración.
+  SNAPSHOT_RETENTION_DAYS: z.preprocess(
+    (value) => {
+      if (value === undefined) return 90;
+      if (typeof value === 'string' && value.trim() === '') return null;
+      return value;
+    },
+    z.union([z.coerce.number().int().positive(), z.null()]),
+  ),
   JOB_RUNS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
   STALE_RUN_THRESHOLD_MIN: z.coerce.number().int().positive().default(15),
   WORKER_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
+
+  // --- api-rest: rate limiting, confianza en el proxy, superficie de admin ---
+  // TRUST_PROXY no tiene valor por defecto a nivel de schema: su default (0
+  // en desarrollo, 1 en producción) depende de NODE_ENV, que no se conoce
+  // hasta que se parsea el objeto completo — se resuelve más abajo vía
+  // `.transform()` sobre el schema completo.
+  TRUST_PROXY: z.coerce.number().int().min(0).optional(),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
+  RATE_LIMIT_WINDOW_MIN: z.coerce.number().int().positive().default(15),
+  STALE_POLL_THRESHOLD_MIN: z.coerce.number().int().positive().default(30),
+  // Opcional: la API arranca sin ella (las rutas de admin devuelven 404 —
+  // ver `requireAdminKey`). Cuando está presente debe ser lo suficientemente
+  // larga como para que forzar el header por fuerza bruta sea impracticable.
+  ADMIN_API_KEY: z.string().min(32, 'ADMIN_API_KEY must be at least 32 characters').optional(),
 });
+
+// El valor por defecto de TRUST_PROXY, dependiente de NODE_ENV, se aplica
+// acá, después de que el objeto base (y por lo tanto NODE_ENV) ya fue
+// validado/resuelto.
+const envSchema = baseEnvSchema.transform((data) => ({
+  ...data,
+  TRUST_PROXY: data.TRUST_PROXY ?? (data.NODE_ENV === 'production' ? 1 : 0),
+}));
 
 export type Config = Readonly<z.infer<typeof envSchema>>;
 
@@ -60,7 +88,7 @@ export interface EnvIssue {
   readonly reason: string;
 }
 
-/** Thrown by {@link parseEnv} when the source object fails schema validation. */
+/** Lanzado por {@link parseEnv} cuando el objeto de origen falla la validación del schema. */
 export class EnvValidationError extends Error {
   readonly issues: readonly EnvIssue[];
 
@@ -72,12 +100,13 @@ export class EnvValidationError extends Error {
 }
 
 /**
- * Pure, side-effect-free environment parser. Accepts the environment source
- * as a parameter (instead of reading `process.env` itself) so it can be unit
- * tested without touching the real process environment.
+ * Parser de entorno puro y sin efectos secundarios. Recibe el origen del
+ * entorno como parámetro (en lugar de leer `process.env` directamente) para
+ * poder testearlo unitariamente sin tocar el entorno real del proceso.
  *
- * @throws {EnvValidationError} when `source` fails schema validation. The
- * error never carries the offending values, only variable names and reasons.
+ * @throws {EnvValidationError} cuando `source` falla la validación del
+ * schema. El error nunca lleva los valores ofensivos, solo los nombres de
+ * las variables y sus razones.
  */
 export function parseEnv(source: Record<string, string | undefined>): Config {
   const result = envSchema.safeParse(source);
@@ -94,13 +123,15 @@ export function parseEnv(source: Record<string, string | undefined>): Config {
 }
 
 /**
- * Fail-fast bootstrap: validates `source`, and on failure logs (at `fatal`)
- * the list of invalid/missing variable *names* (never their values) and
- * exits the process with code 1, before any server or DB connection starts.
+ * Bootstrap de fallo rápido: valida `source` y, si falla, loguea (en
+ * `fatal`) la lista de *nombres* de variables inválidas/faltantes (nunca sus
+ * valores) y termina el proceso con código 1, antes de que arranque
+ * cualquier servidor o conexión a la DB.
  *
- * Uses a standalone bootstrap logger instead of `src/lib/logger.ts` because
- * that logger's own configuration (level, redaction) depends on a valid
- * `config` — which is exactly what may not exist yet at this point.
+ * Usa un logger de bootstrap independiente en lugar de `src/lib/logger.ts`
+ * porque la configuración de ese logger (nivel, redacción) depende de un
+ * `config` válido — que es justamente lo que puede no existir todavía en
+ * este punto.
  */
 function loadConfig(source: Record<string, string | undefined>): Config {
   try {
@@ -111,7 +142,10 @@ function loadConfig(source: Record<string, string | undefined>): Config {
       bootstrapLogger.fatal(
         {
           invalidVariables: error.issues.map((issue) => issue.variable),
-          reasons: error.issues.map((issue) => ({ variable: issue.variable, reason: issue.reason })),
+          reasons: error.issues.map((issue) => ({
+            variable: issue.variable,
+            reason: issue.reason,
+          })),
         },
         'Invalid environment configuration; refusing to start.',
       );
@@ -124,14 +158,15 @@ function loadConfig(source: Record<string, string | undefined>): Config {
 export const config: Config = loadConfig(process.env);
 
 /**
- * Fail-fast guard used only by entrypoints that actually need CoinGecko
- * (`worker.ts`, `scripts/seedCoins.ts`, `scripts/pollPricesOnce.ts`).
+ * Guarda de fallo rápido usada solo por los entrypoints que realmente
+ * necesitan CoinGecko (`worker.ts`, `scripts/seedCoins.ts`,
+ * `scripts/pollPricesOnce.ts`).
  *
- * `COINGECKO_API_KEY` is optional at the schema level so the API process
- * (which doesn't need it until a later stage) can boot without it; each
- * entrypoint that does need it calls this immediately after loading config
- * and fails fast (fatal log + exit 1) if it's missing, using the same
- * fatal-log-and-exit-1 pattern as {@link loadConfig}.
+ * `COINGECKO_API_KEY` es opcional a nivel de schema para que el proceso de
+ * la API (que no la necesita hasta una etapa posterior) pueda arrancar sin
+ * ella; cada entrypoint que sí la necesita llama a esto inmediatamente
+ * después de cargar la config y falla rápido (log fatal + exit 1) si falta,
+ * usando el mismo patrón de log-fatal-y-exit-1 que {@link loadConfig}.
  */
 export function assertCoinGeckoApiKey(
   cfg: Config,

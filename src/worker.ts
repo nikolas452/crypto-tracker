@@ -24,10 +24,10 @@ function delay(ms: number): { promise: Promise<void>; cancel: () => void } {
 }
 
 /**
- * Process entrypoint for the worker: no HTTP server. RF-1.6/RF-1.7 startup
- * and shutdown sequence. `src/jobs/pollPrices.ts` has no idea any of this
- * (cron, overlap guard, stale-run recovery) exists — this is the only module
- * that does.
+ * Punto de entrada del proceso del worker: sin servidor HTTP. Secuencia de
+ * arranque y apagado de RF-1.6/RF-1.7. `src/jobs/pollPrices.ts` no tiene
+ * idea de que nada de esto (cron, guarda de solapamiento, recuperación de
+ * corridas obsoletas) existe — este es el único módulo que sí sabe.
  */
 async function main(): Promise<void> {
   assertCoinGeckoApiKey(config, logger);
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
   const workerId = createWorkerId();
   const jobRunsRepo = createJobRunsRepo();
 
-  // RF-1.6 step 3: stale-run recovery runs once, before scheduling anything.
+  // RF-1.6 paso 3: la recuperación de corridas obsoletas corre una vez, antes de programar nada.
   const now = systemClock.now();
   const staleThreshold = new Date(now.getTime() - config.STALE_RUN_THRESHOLD_MIN * MINUTE_MS);
   const recoveredCount = await jobRunsRepo.recoverStaleRuns(staleThreshold, now);
@@ -52,7 +52,10 @@ async function main(): Promise<void> {
   }
 
   if (!validate(config.POLL_PRICES_CRON)) {
-    logger.fatal({ cron: config.POLL_PRICES_CRON }, 'Invalid POLL_PRICES_CRON expression; refusing to start.');
+    logger.fatal(
+      { cron: config.POLL_PRICES_CRON },
+      'Invalid POLL_PRICES_CRON expression; refusing to start.',
+    );
     process.exit(1);
     return;
   }
@@ -78,11 +81,14 @@ async function main(): Promise<void> {
     workerId,
   });
 
-  // RF-1.5: in-memory overlap guard. Lives here, not in the job.
+  // RF-1.5: guarda de solapamiento en memoria. Vive acá, no en el job.
   const guard = createOverlapGuard<JobTrigger, unknown>({
     run: (trigger) => job.run(trigger),
     onOverlap: async (trigger) => {
-      logger.warn({ jobName: JOB_NAME, trigger }, 'poll-prices: overlap detected; skipping this tick');
+      logger.warn(
+        { jobName: JOB_NAME, trigger },
+        'poll-prices: overlap detected; skipping this tick',
+      );
       const overlapAt = systemClock.now();
       await jobRunsRepo.createSkipped({
         jobName: JOB_NAME,
@@ -104,16 +110,13 @@ async function main(): Promise<void> {
     { timezone: 'UTC', name: JOB_NAME },
   );
 
-  logger.info(
-    { workerId, cron: config.POLL_PRICES_CRON, activeCoinsCount },
-    'Worker started',
-  );
+  logger.info({ workerId, cron: config.POLL_PRICES_CRON, activeCoinsCount }, 'Worker started');
 
   if (config.POLL_PRICES_RUN_ON_START) {
     void guard.runGuarded('startup');
   }
 
-  // --- RF-1.7: ordered shutdown ---
+  // --- RF-1.7: apagado ordenado ---
   let shuttingDown = false;
 
   async function shutdown(signal: string): Promise<void> {

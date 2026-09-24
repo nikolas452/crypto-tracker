@@ -6,6 +6,7 @@
 ## 1. Objetivo
 
 Reemplazar node-cron por Agenda para que la programación y el estado de los jobs vivan en MongoDB y no en la memoria del proceso. Así se puede:
+
 - Correr más de un worker sin que los jobs se dupliquen.
 - Ver y controlar los jobs desde la API (ejecutar ahora, pausar, reanudar).
 - Reintentar fallas con una política explícita.
@@ -14,6 +15,7 @@ Reemplazar node-cron por Agenda para que la programación y el estado de los job
 ## 2. Contexto
 
 El worker usa node-cron con dos tareas (`poll-prices` y `send-notifications`) y guards de overlap en memoria. Las limitaciones que quedaron documentadas:
+
 - Una ejecución manual puede superponerse con la del worker.
 - Con dos workers, cada uno ejecutaría su propia agenda.
 - No hay forma de disparar o pausar jobs desde la API.
@@ -39,6 +41,7 @@ El worker usa node-cron con dos tareas (`poll-prices` y `send-notifications`) y 
 ## 4. Alcance
 
 **Incluye**
+
 - Instalación de `agenda` y `@agendajs/mongo-backend`, reutilizando la conexión de Mongoose.
 - Migración de `poll-prices` y `send-notifications` a Agenda.
 - Nuevo job `maintenance`.
@@ -50,6 +53,7 @@ El worker usa node-cron con dos tareas (`poll-prices` y `send-notifications`) y 
 - Remoción de node-cron (o convivencia opcional mediante `SCHEDULER`).
 
 **No incluye**
+
 - Notificaciones en tiempo real entre procesos (pub/sub).
 - Dashboard web (Agendash queda como opcional; verificar su compatibilidad con v6).
 - BullMQ (etapa 8).
@@ -67,18 +71,20 @@ El worker usa node-cron con dos tareas (`poll-prices` y `send-notifications`) y 
 ## 6. Modelo de datos
 
 ### 6.1 `agenda_jobs`
+
 Colección administrada por Agenda. **La app no escribe en ella directamente.** Solo lee (para el admin) a través de la API de Agenda o, si no alcanza, con consultas de solo lectura.
 
 ### 6.2 `job_locks` (nueva)
 
-| Campo | Tipo | Reglas |
-| --- | --- | --- |
-| `_id` | string | Nombre del recurso (`poll-prices`) |
-| `lockedBy` | string | `workerId` + `runId` |
-| `lockedUntil` | Date | — |
-| `acquiredAt` | Date | — |
+| Campo         | Tipo   | Reglas                             |
+| ------------- | ------ | ---------------------------------- |
+| `_id`         | string | Nombre del recurso (`poll-prices`) |
+| `lockedBy`    | string | `workerId` + `runId`               |
+| `lockedUntil` | Date   | —                                  |
+| `acquiredAt`  | Date   | —                                  |
 
 ### 6.3 Cambios en `job_runs`
+
 - `trigger` suma los valores `agenda`, `retry` y `api`. `schedule` queda solo para el modo node-cron.
 - `skipReason` suma `locked`.
 - Campo nuevo `agendaJobId` (string \| null).
@@ -87,6 +93,7 @@ Colección administrada por Agenda. **La app no escribe en ella directamente.** 
 ## 7. Requerimientos funcionales
 
 ### RF-6.1 Instancia de Agenda (`src/scheduler/agenda.ts`)
+
 - `createAgenda({ db, role: 'worker' | 'producer' })` devuelve la instancia configurada con:
   - `backend` según las decisiones técnicas.
   - `processEvery: AGENDA_PROCESS_EVERY`.
@@ -97,17 +104,18 @@ Colección administrada por Agenda. **La app no escribe en ella directamente.** 
 
 ### RF-6.2 Definiciones de jobs
 
-| Job | Programación | `concurrency` | `lockLimit` | `lockLifetime` | Prioridad |
-| --- | --- | --- | --- | --- | --- |
-| `poll-prices` | `every(POLL_PRICES_CRON)` | 1 | 1 | 5 min | `high` |
-| `send-notifications` | `every(SEND_NOTIFICATIONS_CRON)` | 1 | 1 | 5 min | `high` |
-| `maintenance` | `every(MAINTENANCE_CRON)` (default `15 3 * * *`, 03:15 UTC) | 1 | 1 | 15 min | `low` |
+| Job                  | Programación                                                | `concurrency` | `lockLimit` | `lockLifetime` | Prioridad |
+| -------------------- | ----------------------------------------------------------- | ------------- | ----------- | -------------- | --------- |
+| `poll-prices`        | `every(POLL_PRICES_CRON)`                                   | 1             | 1           | 5 min          | `high`    |
+| `send-notifications` | `every(SEND_NOTIFICATIONS_CRON)`                            | 1             | 1           | 5 min          | `high`    |
+| `maintenance`        | `every(MAINTENANCE_CRON)` (default `15 3 * * *`, 03:15 UTC) | 1             | 1           | 15 min         | `low`     |
 
 - Las expresiones cron se evalúan en UTC. Si v6 acepta la opción de timezone en `every`, se pasa `'UTC'` explícito; si no, el proceso corre con `TZ=UTC`.
 - **Registro idempotente:** al arrancar, el worker llama a `every()` para cada job recurrente. Reiniciar el worker N veces deja **un solo** documento recurrente por nombre (criterio E6-2). Si cambia la expresión, se actualiza la existente.
 - **Limpieza de jobs recurrentes obsoletos:** al arrancar, se cancelan los documentos recurrentes cuyo nombre ya no está en `JOB_NAMES`.
 
 ### RF-6.3 Lease lock para `poll-prices`
+
 Módulo `src/lib/lease-lock.ts`:
 
 ```ts
@@ -129,6 +137,7 @@ release(name: string, owner: string): Promise<void>
 - Se eliminan los guards `isRunning` en memoria.
 
 ### RF-6.4 Adaptadores de handlers
+
 - `poll-prices`:
   1. `trigger` es `data.trigger ?? 'agenda'`.
   2. Ejecuta la lógica de la etapa 1 y la etapa 5.
@@ -143,6 +152,7 @@ release(name: string, owner: string): Promise<void>
 - Los adaptadores reciben las dependencias por closure (fábrica), no las importan.
 
 ### RF-6.5 Política de reintentos
+
 - Agenda 6.2.6 no documenta reintentos automáticos. Se implementan en el listener `fail:poll-prices`:
   - Si el error es transitorio (`COINGECKO_UNAVAILABLE`, `COINGECKO_RATE_LIMITED`, `ALERT_EVALUATION_FAILED`) y `data.attempt < POLL_MAX_JOB_RETRIES + 1` (default 1 reintento), programa `schedule('in 2 minutes', 'poll-prices', { trigger: 'retry', attempt: attempt + 1, parentJobId })`.
   - Errores no transitorios (`COINGECKO_AUTH`, `INTERNAL`) no se reintentan.
@@ -151,11 +161,13 @@ release(name: string, owner: string): Promise<void>
 - `send-notifications` y `maintenance` no se reintentan: la próxima ejecución programada cumple ese rol.
 
 ### RF-6.6 Observabilidad de eventos
+
 - `start` y `success` → `debug`, con `jobName` y `agendaJobId`.
 - `fail` → `error`, con `jobName`, `agendaJobId`, `error.code` y stack (el stack va al log, no a `failReason`).
 - Contadores en memoria por job (`started`, `succeeded`, `failed`), expuestos en el log periódico del worker cada 10 minutos (`info`).
 
 ### RF-6.7 Entrypoint del worker
+
 1. Config, DB, `ensureCollections()` y verificación de replica set (igual que antes).
 2. `createAgenda({ role: 'worker' })`, registro de definiciones y `every()`.
 3. Limpieza de jobs recurrentes obsoletos.
@@ -167,18 +179,22 @@ release(name: string, owner: string): Promise<void>
    3. Cierra la DB y sale.
 
 ### RF-6.8 Modo de scheduler (opcional, para comparar)
+
 - `SCHEDULER=agenda` (default) \| `cron`.
 - Con `cron`, el worker usa la implementación de la etapa 1 (node-cron), manteniendo lease y outbox.
 - Si no se implementa este modo, se elimina node-cron de las dependencias.
 
 ### RF-6.9 Endpoints de admin de jobs
+
 Todos con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`. La API usa la instancia productora.
 
 **`GET /api/v1/admin/jobs`**
+
 - Lista los jobs **recurrentes** con `name`, `schedule` (intervalo o cron), `nextRunAt`, `lastRunAt`, `lastFinishedAt`, `failCount`, `failReason`, `failedAt`, `lockedAt`, `disabled`, y el último `JobRun` de ese nombre (`status`, `finishedAt`).
 - Query `includeOneOff=true` agrega los únicos de las últimas 24 h.
 
 **`POST /api/v1/admin/jobs/:name/run`**
+
 - `name` debe estar en `JOB_NAMES`. Si no, 404.
 - Hace `agenda.now(name, { trigger: 'api', requestedBy: userId })`.
 - **202 Accepted**: `{ "data": { "agendaJobId": "...", "name": "poll-prices", "queuedAt": "..." } }`.
@@ -186,11 +202,13 @@ Todos con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`. La API
 - Rate limit específico: 1 request cada 30 s por job, para cuidar la cuota de CoinGecko.
 
 **`POST /api/v1/admin/jobs/:name/disable`** y **`/enable`**
+
 - `agenda.disable({ name })` / `agenda.enable({ name })`.
 - 200 con el estado resultante.
 - Un job deshabilitado no se ejecuta aunque venza su `nextRunAt`.
 
 **`GET /api/v1/status`**
+
 - Se extiende con `pollPrices.nextRunAt` y `pollPrices.disabled`.
 
 ## 8. Requerimientos no funcionales
@@ -203,15 +221,15 @@ Todos con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`. La API
 
 ## 9. Variables de entorno nuevas
 
-| Variable | Default |
-| --- | --- |
-| `SCHEDULER` | `agenda` |
-| `AGENDA_PROCESS_EVERY` | `10 seconds` |
-| `AGENDA_MAX_CONCURRENCY` | 5 |
-| `AGENDA_ONE_OFF_RETENTION_DAYS` | 7 |
-| `MAINTENANCE_CRON` | `15 3 * * *` |
-| `POLL_LOCK_TTL_MS` | 300000 |
-| `POLL_MAX_JOB_RETRIES` | 1 |
+| Variable                        | Default      |
+| ------------------------------- | ------------ |
+| `SCHEDULER`                     | `agenda`     |
+| `AGENDA_PROCESS_EVERY`          | `10 seconds` |
+| `AGENDA_MAX_CONCURRENCY`        | 5            |
+| `AGENDA_ONE_OFF_RETENTION_DAYS` | 7            |
+| `MAINTENANCE_CRON`              | `15 3 * * *` |
+| `POLL_LOCK_TTL_MS`              | 300000       |
+| `POLL_MAX_JOB_RETRIES`          | 1            |
 
 `POLL_PRICES_CRON`, `SEND_NOTIFICATIONS_CRON` y `WORKER_SHUTDOWN_TIMEOUT_MS` se mantienen.
 
@@ -245,11 +263,13 @@ Todos con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`. La API
 ## 12. Testing requerido
 
 **Unitarios**
+
 - Lease lock contra Mongo en memoria (es corto y conviene probarlo real): adquirir libre, adquirir ocupado, adquirir vencido, re-adquirir siendo dueño, liberar ajeno (no hace nada).
 - Clasificación de errores reintentables y regla de "no reintentar si el próximo run está cerca" (función pura con reloj falso).
 - Adaptador de `poll-prices`: lanza solo con `failed`.
 
 **Integración** (`MongoMemoryReplSet` + Agenda real con `processEvery` bajo, por ejemplo `'200 milliseconds'`)
+
 - Helper `waitForJob(agenda, name, event)` que devuelve una promesa resuelta con el evento `complete:<name>` o `fail:<name>`, con timeout.
 - E6-1, E6-2 y E6-3 (inicializando el worker varias veces dentro del test).
 - E6-4 y E6-5.
@@ -259,6 +279,7 @@ Todos con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`. La API
 - E6-12 con un job falso lento, verificando que `drain` espera.
 
 **Manual**
+
 - 2 terminales con `npm run dev:worker` durante 30 minutos. Revisar `job_runs` en Compass (E6-6 real).
 - `kill -9` a un worker durante un run y observar la recuperación (RNF-6.2).
 

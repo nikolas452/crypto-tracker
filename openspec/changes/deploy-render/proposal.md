@@ -16,6 +16,7 @@ This change therefore scopes deployment as a **learning exercise on the free tie
 **In scope:** production build, the `render.yaml` blueprint for a single free web service, MongoDB Atlas M0 setup, environment and secret management, the readiness-gated deploy, the `db:setup` index script with `--dry-run`, production HTTP hardening, the post-deploy smoke test, initial data loading, the runbook, and acceptance criteria **E7-1**, **E7-2**, **E7-3**, **E7-8**, **E7-9** and **E7-11**.
 
 **Explicitly out of scope, with the criteria they carry:**
+
 - The Render Background Worker and any paid plan — and with it **E7-4**, which asserts worker-produced job runs appearing in Atlas every 10 minutes.
 - The internal `POST /api/v1/internal/jobs/run-cycle` endpoint, `INTERNAL_API_KEY`, `RUN_CYCLE_TIMEOUT_MS` and `WORKER_MODE` — and with them **E7-5** and **E7-6**.
 - The scheduled GitHub Actions trigger workflow, together with its free-hours accounting and the 60-day public-repository inactivity rule.
@@ -40,6 +41,7 @@ A consequence worth recording: with no process connecting continuously, the Atla
 ## Capabilities
 
 ### New Capabilities
+
 - `production-build`: the compile-to-`dist` build, the Render build and start commands, the pinned Node version with an upper bound in both `.node-version` and `engines`, and the rule that no development-only tool — `tsx`, `pino-pretty` — is required to start in production.
 - `render-blueprint`: `render.yaml` — the environment-variable group, the single free web service, the readiness health check path, CI-gated auto-deploy, the prohibition on literal secret values, and region selection relative to Atlas.
 - `atlas-setup`: the M0 cluster, its documented limits, the least-privilege database user, network access options and their trade-off, the connection URI parameters, the storage estimate, and the required verification that time-series collections and transactions work on the free tier.
@@ -50,6 +52,7 @@ A consequence worth recording: with no process connecting continuously, the Atla
 - `deploy-runbook`: `docs/runbook.md` — deploy, rollback and per-secret rotation procedures, the failure playbooks that apply to this deployment shape, how to run `db:setup` and `seed:coins` against production, and useful diagnostic queries.
 
 ### Modified Capabilities
+
 - `db-connection`: the Mongoose connection is now configured with an explicit `maxPoolSize` from `MONGODB_MAX_POOL_SIZE` (default 10), alongside the existing `strictQuery` and environment-dependent `autoIndex` settings.
 - `dev-tooling`: `package.json` gains the `db:setup` and `smoke` scripts.
 

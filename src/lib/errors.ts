@@ -1,9 +1,14 @@
 import type { ZodType } from 'zod';
 
 /**
- * Fixed error-code table (see `requerimientos/00-indice-y-convenciones.md`,
- * section 5.2). Every `AppError` derivative maps 1:1 to one of these codes
- * and its corresponding HTTP status.
+ * Errores de aplicación tipados y su tabla de códigos asociada, usados en
+ * todo el proyecto para producir respuestas HTTP consistentes.
+ */
+
+/**
+ * Tabla fija de códigos de error (ver `requerimientos/00-indice-y-convenciones.md`,
+ * sección 5.2). Cada derivado de `AppError` se mapea 1:1 a uno de estos
+ * códigos y su código de estado HTTP correspondiente.
  */
 export type ErrorCode =
   | 'VALIDATION_ERROR'
@@ -29,9 +34,9 @@ export interface AppErrorOptions {
 }
 
 /**
- * Base class for every known, well-shaped application error. The centralized
- * error handler uses `instanceof AppError` as its single decision point for
- * "is this a known error, or an unexpected one".
+ * Clase base para todo error de aplicación conocido y bien definido. El
+ * manejador de errores centralizado usa `instanceof AppError` como único
+ * punto de decisión para saber si es un error conocido o uno inesperado.
  */
 export class AppError extends Error {
   readonly code: ErrorCode;
@@ -117,9 +122,9 @@ export class InternalError extends AppError {
 export type ValidationSource = 'body' | 'query' | 'params';
 
 /**
- * Runs `schema` against `data`; on failure throws a {@link ValidationError}
- * whose `details` are built from the Zod issues, each `path` prefixed with
- * `source` (e.g. `query.limit`).
+ * Ejecuta `schema` contra `data`; si falla, lanza un {@link ValidationError}
+ * cuyos `details` se construyen a partir de los issues de Zod, con cada
+ * `path` prefijado por `source` (por ejemplo, `query.limit`).
  */
 export function validate<T>(schema: ZodType<T>, data: unknown, source: ValidationSource): T {
   const result = schema.safeParse(data);

@@ -2,10 +2,11 @@ import { Router } from 'express';
 import type { ReadinessCheck } from '../lib/health.js';
 
 /**
- * `GET /health` (liveness, no dependency) and `GET /health/ready`
- * (readiness, runs every check in `readinessChecks`). `/health/ready` is the
- * one endpoint in the API that does NOT use the global error format: deploy
- * platforms read the status code and the body describes each check.
+ * `GET /health` (liveness, sin dependencias) y `GET /health/ready`
+ * (readiness, ejecuta cada chequeo de `readinessChecks`). `/health/ready` es
+ * el único endpoint de la API que NO usa el formato de error global: las
+ * plataformas de despliegue leen el código de estado y el body describe cada
+ * chequeo.
  */
 export function createHealthRouter(readinessChecks: readonly ReadinessCheck[]): Router {
   const router = Router();

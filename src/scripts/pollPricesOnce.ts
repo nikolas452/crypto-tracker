@@ -12,15 +12,16 @@ import { createJobRunsRepo } from '../modules/job-runs/job-runs.service.js';
 import { createPollPricesJob, type JobRunResult } from '../jobs/pollPrices.js';
 
 /**
- * `npm run job:poll-prices` (RF-1.8): runs the `poll-prices` job exactly
- * once with `trigger: "manual"`, prints the result and exits.
+ * `npm run job:poll-prices` (RF-1.8): ejecuta el job `poll-prices` exactamente
+ * una vez con `trigger: "manual"`, imprime el resultado y termina.
  *
- * Does NOT coordinate with the worker's in-memory overlap guard — that flag
- * lives only inside the worker process's memory. If this script runs while
- * the worker is mid-tick, both may execute concurrently; the job's own
- * deduplication (by `sourceUpdatedAt`, one aggregation per run) is what
- * prevents duplicate snapshot data in that case, not a shared lock. Real
- * cross-process coordination is deferred to stage 6 (Agenda-based locking).
+ * NO se coordina con la guarda de solapamiento en memoria del worker — ese
+ * flag vive solo dentro de la memoria del proceso del worker. Si este script
+ * corre mientras el worker está a mitad de un tick, ambos pueden ejecutarse
+ * concurrentemente; la propia deduplicación del job (por `sourceUpdatedAt`,
+ * una agregación por corrida) es lo que evita datos de snapshot duplicados
+ * en ese caso, no un lock compartido. La coordinación real entre procesos
+ * queda diferida a la etapa 6 (locking basado en Agenda).
  */
 export function exitCodeFor(status: JobRunResult['status']): 0 | 1 {
   return status === 'failed' ? 1 : 0;
@@ -71,7 +72,8 @@ async function main(): Promise<void> {
   process.exitCode = exitCodeFor(result.status);
 }
 
-const isMainModule = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
+const isMainModule =
+  process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
 
 if (isMainModule) {
   main().catch((err: unknown) => {
