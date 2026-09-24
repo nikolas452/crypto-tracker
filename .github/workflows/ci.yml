@@ -1,3 +1,8 @@
+# =============================================================================
+# CI — corre en cada push a develop (rama que Render tiene configurada para
+# autodeploy con "After CI Checks Pass": lee este status check y deploya solo
+# cuando queda en verde) y en cada PR contra main.
+# =============================================================================
 name: CI
 
 on:
@@ -6,27 +11,85 @@ on:
   pull_request:
     branches: [main]
 
+# Si llegan varios pushes seguidos a la misma rama/PR mientras corre el pipeline,
+# cancela la corrida anterior en vez de dejarlas correr todas en paralelo —
+# solo importa el resultado del último commit.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Mínimo permiso posible para el GITHUB_TOKEN de este workflow: solo necesita
+# leer el código (checkout).
+permissions:
+  contents: read
+
 jobs:
-  build:
+  # ---------------------------------------------------------------------------
+  # Chequeo de tipos de TypeScript — separado del lint porque son herramientas
+  # distintas (tsc vs eslint) y así ves en la UI cuál de las dos rompió.
+  # ---------------------------------------------------------------------------
+  typecheck:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js 24
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
 
-      - name: Install dependencies
-        run: npm ci
+  # ---------------------------------------------------------------------------
+  # Lint — reglas de estilo/calidad de código (ESLint).
+  # ---------------------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
 
-      - name: Typecheck
-        run: npm run typecheck
+  # ---------------------------------------------------------------------------
+  # Tests. Vitest + mongodb-memory-server: levanta su propia instancia de
+  # Mongo en memoria dentro del proceso de test, no hace falta un servicio
+  # sidecar acá.
+  # ---------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
 
-      - name: Lint
-        run: npm run lint
+  # ---------------------------------------------------------------------------
+  # Build — corre al final y solo si los tres jobs anteriores pasaron (needs).
+  # Fail fast: no tiene sentido compilar si ya sabías que iba a fallar.
+  # ---------------------------------------------------------------------------
+  build:
+    needs: [typecheck, lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
 
-      - name: Test
-        run: npm test
+      # GITHUB_STEP_SUMMARY: resumen visual del run en vez de tener que abrir
+      # los logs crudos.
+      - name: Resumen del build
+        run: |
+          echo "### ✅ Build OK" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Rama: \`${{ github.ref_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Autor: ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
