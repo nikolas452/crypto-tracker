@@ -17,6 +17,7 @@ The repository is currently empty (only a placeholder `package.json`). Every lat
 ## Capabilities
 
 ### New Capabilities
+
 - `app-config`: reads and validates environment variables with Zod into a single frozen, typed `config` object; fails fast (log + exit 1) on invalid or missing required variables, never logging the offending values.
 - `db-connection`: establishes and tears down the MongoDB connection, with retry-with-backoff on startup and logging of connection lifecycle events (`connected`, `disconnected`, `reconnected`, `error`).
 - `http-server`: separates the Express app factory (`createApp`, no `listen`) from the process entrypoint (`server.ts`), and wires the fixed base middleware chain (request id, request logging, security headers, body parsing) in front of the app's routes.
@@ -26,6 +27,7 @@ The repository is currently empty (only a placeholder `package.json`). Every lat
 - `dev-tooling`: provides the local development environment (Docker Compose Mongo), `.env.example`, README run instructions, npm scripts, and the CI pipeline that runs typecheck/lint/test on every push and PR.
 
 ### Modified Capabilities
+
 None — this is a greenfield change; no existing specs are being modified.
 
 ## Impact

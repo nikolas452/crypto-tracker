@@ -1,0 +1,390 @@
+{
+  "info": {
+    "_postman_id": "b6f2a1a0-6e3e-4b1a-9e7a-4f2c8f1c9d10",
+    "name": "Crypto Tracker API",
+    "description": "Stage 0 (base setup) + Stage 2 (api-rest) endpoints. Mirrors requests.http.\n\nRun `npm run dev` first. Stage 2 requests need a seeded catalog (`npm run seed:coins`) and at least one poll-prices run (`npm run job:poll-prices` or `npm run dev:worker`) for non-empty responses. Admin requests need `ADMIN_API_KEY` set in `.env` and the same value in the `adminApiKey` collection variable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "adminApiKey", "value": "<your-admin-api-key>", "type": "string" },
+    { "key": "coingeckoId", "value": "bitcoin", "type": "string" },
+    { "key": "jobRunId", "value": "651f1c2e8b1e2a0012a3b456", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
+            "description": "Never touches the database."
+          }
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "ready"]
+            },
+            "description": "Checks Mongo connectivity: 200 when up, 503 when down."
+          }
+        },
+        {
+          "name": "Liveness with X-Request-Id",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Request-Id", "value": "manual-test-123" }],
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
+            "description": "Request id is echoed back when supplied by the client."
+          }
+        },
+        {
+          "name": "Unknown route -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/no-existe", "host": ["{{baseUrl}}"], "path": ["no-existe"] },
+            "description": "404 NOT_FOUND with the global error format."
+          }
+        },
+        {
+          "name": "Malformed JSON body -> 400",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"invalid\": json}" },
+            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
+            "description": "400 VALIDATION_ERROR (\"JSON inválido\")."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Coins",
+      "item": [
+        {
+          "name": "List coins (default)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins"]
+            },
+            "description": "Default page/limit, sorted by market cap descending."
+          }
+        },
+        {
+          "name": "List coins (paginated, sorted)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins?page=1&limit=10&sort=change24h&order=asc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" },
+                { "key": "sort", "value": "change24h" },
+                { "key": "order", "value": "asc" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List coins (search q)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins?q=bit",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins"],
+              "query": [{ "key": "q", "value": "bit" }]
+            },
+            "description": "Case-insensitive prefix match over symbol/name."
+          }
+        },
+        {
+          "name": "List coins - unknown query param -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins?foo=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins"],
+              "query": [{ "key": "foo", "value": "1" }]
+            },
+            "description": "E2-4: unknown query param -> 400 VALIDATION_ERROR."
+          }
+        },
+        {
+          "name": "Coin detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}"]
+            }
+          }
+        },
+        {
+          "name": "Coin detail - unknown -> 404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/no-existe",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "no-existe"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Price History",
+      "item": [
+        {
+          "name": "History - raw (auto-selected)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?from=2026-09-22T00:00:00Z&to=2026-09-22T06:00:00Z",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "query": [
+                { "key": "from", "value": "2026-09-22T00:00:00Z" },
+                { "key": "to", "value": "2026-09-22T06:00:00Z" }
+              ]
+            },
+            "description": "Short window -> interval auto-selected as \"raw\"."
+          }
+        },
+        {
+          "name": "History - raw (explicit)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?interval=raw&from=2026-09-22T00:00:00Z&to=2026-09-22T06:00:00Z",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "query": [
+                { "key": "interval", "value": "raw" },
+                { "key": "from", "value": "2026-09-22T00:00:00Z" },
+                { "key": "to", "value": "2026-09-22T06:00:00Z" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "History - 1h buckets with SMA(3)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?interval=1h&from=2026-09-16T00:00:00Z&to=2026-09-23T00:00:00Z&sma=3",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "query": [
+                { "key": "interval", "value": "1h" },
+                { "key": "from", "value": "2026-09-16T00:00:00Z" },
+                { "key": "to", "value": "2026-09-23T00:00:00Z" },
+                { "key": "sma", "value": "3" }
+              ]
+            },
+            "description": "OHLC candles over 7 days, with a 3-bucket simple moving average."
+          }
+        },
+        {
+          "name": "History - 1d buckets (90 days)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?interval=1d&from=2026-06-25T00:00:00Z&to=2026-09-23T00:00:00Z",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "query": [
+                { "key": "interval", "value": "1d" },
+                { "key": "from", "value": "2026-06-25T00:00:00Z" },
+                { "key": "to", "value": "2026-09-23T00:00:00Z" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "History - raw over max range -> 400",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?interval=raw&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "query": [
+                { "key": "interval", "value": "raw" },
+                { "key": "from", "value": "2026-09-01T00:00:00Z" },
+                { "key": "to", "value": "2026-09-23T00:00:00Z" }
+              ]
+            },
+            "description": "E2-8: raw over a range exceeding the 7-day cap -> 400 suggesting interval=1h."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Price Stats",
+      "item": [
+        {
+          "name": "Stats - default range (24h)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}", "stats"]
+            }
+          }
+        },
+        {
+          "name": "Stats - 7 days",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/stats?range=7d",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}", "stats"],
+              "query": [{ "key": "range", "value": "7d" }]
+            }
+          }
+        },
+        {
+          "name": "Stats - 90 days",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/stats?range=90d",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "coins", "{{coingeckoId}}", "stats"],
+              "query": [{ "key": "range", "value": "90d" }]
+            },
+            "description": "RNF-2.1 sets a p95 < 200ms budget for this range."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Status",
+      "item": [
+        {
+          "name": "Worker status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "status"]
+            },
+            "description": "Public worker-health summary - no admin key required."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Job Runs",
+      "item": [
+        {
+          "name": "List job runs - no key -> 401/404",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/job-runs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "job-runs"]
+            },
+            "description": "401 UNAUTHENTICATED (E2-13) if ADMIN_API_KEY is set, or 404 NOT_FOUND (E2-14) if it's unset."
+          }
+        },
+        {
+          "name": "List job runs (filtered by status)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Admin-Key", "value": "{{adminApiKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/job-runs?status=success,partial&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "job-runs"],
+              "query": [
+                { "key": "status", "value": "success,partial" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List job runs (filtered by jobName + date range)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Admin-Key", "value": "{{adminApiKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/job-runs?jobName=poll-prices&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "job-runs"],
+              "query": [
+                { "key": "jobName", "value": "poll-prices" },
+                { "key": "from", "value": "2026-09-01T00:00:00Z" },
+                { "key": "to", "value": "2026-09-23T00:00:00Z" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Job run detail",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Admin-Key", "value": "{{adminApiKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/job-runs/{{jobRunId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "job-runs", "{{jobRunId}}"]
+            },
+            "description": "Replace {{jobRunId}} with a real _id from the list response."
+          }
+        },
+        {
+          "name": "Job run detail - malformed id -> 400",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Admin-Key", "value": "{{adminApiKey}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/job-runs/not-an-object-id",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "job-runs", "not-an-object-id"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,7 +1,13 @@
 import type { Logger } from 'pino';
 import { z } from 'zod';
 import { CoinGeckoError } from './coingecko.errors.js';
-import type { CoinGeckoClient, GetSimplePricesResult, MarketCoin, SimplePrice } from './coingecko.types.js';
+import type {
+  CoinGeckoClient,
+  GetSimplePricesResult,
+  MarketChartPoint,
+  MarketCoin,
+  SimplePrice,
+} from './coingecko.types.js';
 
 export type SleepFn = (ms: number) => Promise<void>;
 
@@ -9,7 +15,7 @@ async function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Base backoff waits (ms) before jitter, indexed by retry attempt (0 = first retry). */
+/** Esperas base de backoff (ms) antes del jitter, indexadas por intento de reintento (0 = primer reintento). */
 const BACKOFF_MS = [1000, 3000] as const;
 const JITTER_RATIO = 0.2;
 const RATE_LIMIT_FALLBACK_WAIT_MS = 30000;
@@ -22,11 +28,11 @@ export interface CreateCoinGeckoClientDeps {
   readonly maxRetries: number;
   readonly maxIdsPerCall: number;
   readonly logger: Logger;
-  /** Injectable so tests never actually wait. Defaults to a real `setTimeout`-based sleep. */
+  /** Inyectable para que los tests nunca esperen de verdad. Por defecto, un sleep real basado en `setTimeout`. */
   readonly sleep?: SleepFn;
-  /** Injectable source of randomness for jitter, `[0, 1)`. Defaults to `Math.random`. */
+  /** Fuente inyectable de aleatoriedad para el jitter, `[0, 1)`. Por defecto, `Math.random`. */
   readonly random?: () => number;
-  /** Injectable for tests (`vi.stubGlobal('fetch', ...)` also works without this). Defaults to the global `fetch`. */
+  /** Inyectable para tests (`vi.stubGlobal('fetch', ...)` también funciona sin esto). Por defecto, el `fetch` global. */
   readonly fetchFn?: typeof fetch;
 }
 
@@ -52,6 +58,16 @@ const marketCoinEntrySchema = z
   .passthrough();
 
 const marketsResponseSchema = z.array(marketCoinEntrySchema);
+
+const chartPointSchema = z.tuple([z.number(), z.number()]);
+
+const marketChartResponseSchema = z
+  .object({
+    prices: z.array(chartPointSchema),
+    market_caps: z.array(chartPointSchema).optional(),
+    total_volumes: z.array(chartPointSchema).optional(),
+  })
+  .passthrough();
 
 function epochSecondsToDate(value: number | null | undefined): Date | null {
   return typeof value === 'number' ? new Date(value * 1000) : null;
@@ -81,11 +97,11 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
 }
 
 /**
- * Creates the CoinGecko HTTP client. Uses native `fetch` with
- * `AbortSignal.timeout(ms)` per attempt — no axios. Batches are always
- * requested sequentially, never in parallel. Every retryable failure
- * (timeout, network error, 5xx, one 429) waits via the injected `sleep`, so
- * unit tests never actually wait.
+ * Crea el cliente HTTP de CoinGecko. Usa el `fetch` nativo con
+ * `AbortSignal.timeout(ms)` por intento — sin axios. Los batches siempre se
+ * piden en forma secuencial, nunca en paralelo. Todo fallo reintentable
+ * (timeout, error de red, 5xx, un 429) espera mediante el `sleep` inyectado,
+ * así los tests unitarios nunca esperan de verdad.
  */
 export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeckoClient {
   const { baseUrl, apiKey, timeoutMs, maxRetries, maxIdsPerCall, logger } = deps;
@@ -100,9 +116,9 @@ export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeck
   }
 
   /**
-   * Performs one logical call (with retries) against `path`. Never includes
-   * the API key in the path, in any log line, or in any thrown error
-   * message — only the `x-cg-demo-api-key` header carries it.
+   * Realiza una llamada lógica (con reintentos) contra `path`. Nunca incluye
+   * la API key en el path, en ninguna línea de log, ni en ningún mensaje de
+   * error lanzado — solo el header `x-cg-demo-api-key` la lleva.
    */
   async function requestWithRetry(path: string): Promise<{ json: unknown; attempts: number }> {
     let attempts = 0;
@@ -120,16 +136,23 @@ export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeck
           signal: AbortSignal.timeout(timeoutMs),
         });
       } catch (cause) {
-        logger.debug({ path, err: (cause as Error)?.name, durationMs: Date.now() - startedAt }, 'CoinGecko request failed');
+        logger.debug(
+          { path, err: (cause as Error)?.name, durationMs: Date.now() - startedAt },
+          'CoinGecko request failed',
+        );
         if (retriesUsed < maxRetries) {
           await sleep(jitteredBackoff(retriesUsed));
           retriesUsed += 1;
           continue;
         }
-        throw new CoinGeckoError('COINGECKO_UNAVAILABLE', 'CoinGecko request timed out or failed (network error)', {
-          cause,
-          retryable: true,
-        });
+        throw new CoinGeckoError(
+          'COINGECKO_UNAVAILABLE',
+          'CoinGecko request timed out or failed (network error)',
+          {
+            cause,
+            retryable: true,
+          },
+        );
       }
 
       const durationMs = Date.now() - startedAt;
@@ -146,9 +169,13 @@ export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeck
           retriesUsed += 1;
           continue;
         }
-        throw new CoinGeckoError('COINGECKO_UNAVAILABLE', `CoinGecko responded with status ${response.status}`, {
-          retryable: true,
-        });
+        throw new CoinGeckoError(
+          'COINGECKO_UNAVAILABLE',
+          `CoinGecko responded with status ${response.status}`,
+          {
+            retryable: true,
+          },
+        );
       }
 
       if (response.status === 429) {
@@ -173,13 +200,19 @@ export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeck
         throw error;
       }
 
-      throw new CoinGeckoError('COINGECKO_CLIENT_ERROR', `CoinGecko responded with status ${response.status}`, {
-        retryable: false,
-      });
+      throw new CoinGeckoError(
+        'COINGECKO_CLIENT_ERROR',
+        `CoinGecko responded with status ${response.status}`,
+        {
+          retryable: false,
+        },
+      );
     }
   }
 
-  async function fetchSimplePriceBatch(ids: string[]): Promise<{ entries: Record<string, unknown>; attempts: number }> {
+  async function fetchSimplePriceBatch(
+    ids: string[],
+  ): Promise<{ entries: Record<string, unknown>; attempts: number }> {
     const query = buildQuery({
       ids: ids.join(','),
       vs_currencies: 'usd',
@@ -192,23 +225,34 @@ export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeck
     const { json, attempts } = await requestWithRetry(`/simple/price?${query}`);
     const parsed = simplePriceResponseSchema.safeParse(json);
     if (!parsed.success) {
-      throw new CoinGeckoError('COINGECKO_BAD_RESPONSE', 'CoinGecko simple/price response did not match the expected shape');
+      throw new CoinGeckoError(
+        'COINGECKO_BAD_RESPONSE',
+        'CoinGecko simple/price response did not match the expected shape',
+      );
     }
     return { entries: parsed.data, attempts };
   }
 
-  async function fetchMarketsBatch(ids: string[]): Promise<{ coins: MarketCoin[]; attempts: number }> {
+  async function fetchMarketsBatch(
+    ids: string[],
+  ): Promise<{ coins: MarketCoin[]; attempts: number }> {
     const query = buildQuery({ vs_currency: 'usd', ids: ids.join(',') });
     const { json, attempts } = await requestWithRetry(`/coins/markets?${query}`);
     const parsed = marketsResponseSchema.safeParse(json);
     if (!parsed.success) {
-      throw new CoinGeckoError('COINGECKO_BAD_RESPONSE', 'CoinGecko coins/markets response did not match the expected shape');
+      throw new CoinGeckoError(
+        'COINGECKO_BAD_RESPONSE',
+        'CoinGecko coins/markets response did not match the expected shape',
+      );
     }
 
     const coins: MarketCoin[] = [];
     for (const entry of parsed.data) {
       if (typeof entry.current_price !== 'number' || entry.current_price <= 0) {
-        logger.warn({ coingeckoId: entry.id }, 'Discarding market coin with missing or non-positive current_price');
+        logger.warn(
+          { coingeckoId: entry.id },
+          'Discarding market coin with missing or non-positive current_price',
+        );
         continue;
       }
       coins.push({
@@ -219,6 +263,44 @@ export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeck
       });
     }
     return { coins, attempts };
+  }
+
+  /**
+   * `/coins/{id}/market_chart` (11.4): una sola moneda, nunca fraccionada.
+   * Sin parámetro `interval` — el plan Demo/Public determina la
+   * granularidad automáticamente a partir de `days` (1 día -> cada 5
+   * minutos, 2-90 días -> horaria, >90 días -> diaria), y pasar un
+   * `interval` explícito es una funcionalidad exclusiva del plan Pro de la
+   * que este proyecto no depende.
+   */
+  async function fetchMarketChart(coingeckoId: string, days: number): Promise<MarketChartPoint[]> {
+    const query = buildQuery({ vs_currency: 'usd', days: String(days) });
+    const { json } = await requestWithRetry(`/coins/${coingeckoId}/market_chart?${query}`);
+    const parsed = marketChartResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new CoinGeckoError(
+        'COINGECKO_BAD_RESPONSE',
+        'CoinGecko market_chart response did not match the expected shape',
+      );
+    }
+
+    const points: MarketChartPoint[] = [];
+    parsed.data.prices.forEach(([timestampMs, priceUsd], index) => {
+      if (typeof priceUsd !== 'number' || priceUsd <= 0) {
+        logger.warn(
+          { coingeckoId, timestampMs },
+          'Discarding market_chart point with missing or non-positive price',
+        );
+        return;
+      }
+      points.push({
+        timestamp: new Date(timestampMs),
+        priceUsd,
+        marketCapUsd: parsed.data.market_caps?.[index]?.[1] ?? null,
+        volume24hUsd: parsed.data.total_volumes?.[index]?.[1] ?? null,
+      });
+    });
+    return points;
   }
 
   return {
@@ -261,6 +343,10 @@ export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeck
 
     async ping() {
       await requestWithRetry('/ping');
+    },
+
+    async getMarketChart(coingeckoId, days) {
+      return fetchMarketChart(coingeckoId, days);
     },
   };
 }

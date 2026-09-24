@@ -16,17 +16,17 @@ El objetivo del proyecto es **aprender backend**, con foco en jobs, scheduling y
 
 ## 2. Etapas
 
-| Archivo | Etapa | Depende de |
-| --- | --- | --- |
-| `01-etapa-0-setup-base.md` | Setup base: Express, Mongo, config, errores, health | — |
-| `02-etapa-1-primer-job.md` | Worker + node-cron + snapshots de precios | 0 |
-| `03-etapa-2-api-rest.md` | API de lectura: monedas, histórico, estadísticas | 1 |
-| `04-etapa-3-auth-firebase.md` | Usuarios y autenticación con Firebase Auth | 2 |
-| `05-etapa-4-watchlists.md` | Watchlist por usuario | 3 |
-| `06-etapa-5-alertas-email.md` | Alertas, outbox de notificaciones y email | 4 |
-| `07-etapa-6-agenda.md` | Reemplazo de node-cron por Agenda (jobs persistidos) | 5 |
-| `08-etapa-7-deploy-render.md` | Deploy en Render | 6 (puede adelantarse desde la 2) |
-| `09-etapa-8-bullmq-redis.md` | Opcional: colas con BullMQ + Redis | 7 |
+| Archivo                       | Etapa                                                | Depende de                       |
+| ----------------------------- | ---------------------------------------------------- | -------------------------------- |
+| `01-etapa-0-setup-base.md`    | Setup base: Express, Mongo, config, errores, health  | —                                |
+| `02-etapa-1-primer-job.md`    | Worker + node-cron + snapshots de precios            | 0                                |
+| `03-etapa-2-api-rest.md`      | API de lectura: monedas, histórico, estadísticas     | 1                                |
+| `04-etapa-3-auth-firebase.md` | Usuarios y autenticación con Firebase Auth           | 2                                |
+| `05-etapa-4-watchlists.md`    | Watchlist por usuario                                | 3                                |
+| `06-etapa-5-alertas-email.md` | Alertas, outbox de notificaciones y email            | 4                                |
+| `07-etapa-6-agenda.md`        | Reemplazo de node-cron por Agenda (jobs persistidos) | 5                                |
+| `08-etapa-7-deploy-render.md` | Deploy en Render                                     | 6 (puede adelantarse desde la 2) |
+| `09-etapa-8-bullmq-redis.md`  | Opcional: colas con BullMQ + Redis                   | 7                                |
 
 ```mermaid
 flowchart LR
@@ -37,22 +37,22 @@ La etapa 7 (deploy) puede hacerse antes, apenas termina la 2, y repetirse despu�
 
 ## 3. Decisiones tomadas
 
-| Tema | Decisión | Motivo |
-| --- | --- | --- |
-| Runtime | Node.js 24 LTS | `firebase-admin` 14 pide Node ≥ 22 y `vitest` 5 pide 22.12+ o 24. |
-| Lenguaje | TypeScript en modo `strict` | Consistente con tu ruta de aprendizaje MEAN. |
-| Módulos | ESM (`"type": "module"`) | Agenda 6 es ESM-only; mejor arrancar así desde el día uno. |
-| Framework HTTP | Express 5.2.x | Express 5 pasa automáticamente al manejador de errores las promesas rechazadas en handlers `async`. |
-| Base de datos | MongoDB 8 (local en Docker, Atlas en producción) + Mongoose 9.x | — |
-| Validación | Zod 4.x | Se valida todo lo que entra: body, query, params, variables de entorno y **respuestas de APIs externas**. |
-| Logging | pino 10.x (JSON) | Logs estructurados, legibles por plataformas como Render. |
-| Autenticación | Firebase Auth (el backend solo verifica ID tokens con `firebase-admin` 14.x) | Decisión tuya. |
-| Proveedor de precios | CoinGecko, plan Demo (gratis, con API key) | 100 llamadas/min y **10.000 llamadas/mes**. |
-| Moneda de cotización | Solo USD | Simplifica modelo y agregaciones. Multi-moneda queda fuera de alcance. |
-| Intervalo de polling por defecto | Cada 10 minutos | Cada 10 min ≈ 4.464 llamadas en un mes de 31 días. Cada 5 min ≈ 8.928, demasiado cerca del tope de 10.000 si sumás seeds y ejecuciones manuales. |
-| Tests | Vitest 5 + supertest 7 + mongodb-memory-server 11, **requeridos en cada etapa** | Decisión tuya. |
-| Email | Nodemailer 10 vía SMTP | Mailpit en local, proveedor SMTP en producción. |
-| Scheduler | node-cron 4 (etapas 1–5) → Agenda 6 (etapa 6) → BullMQ 6 opcional (etapa 8) | Progresión didáctica. |
+| Tema                             | Decisión                                                                        | Motivo                                                                                                                                           |
+| -------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Runtime                          | Node.js 24 LTS                                                                  | `firebase-admin` 14 pide Node ≥ 22 y `vitest` 5 pide 22.12+ o 24.                                                                                |
+| Lenguaje                         | TypeScript en modo `strict`                                                     | Consistente con tu ruta de aprendizaje MEAN.                                                                                                     |
+| Módulos                          | ESM (`"type": "module"`)                                                        | Agenda 6 es ESM-only; mejor arrancar así desde el día uno.                                                                                       |
+| Framework HTTP                   | Express 5.2.x                                                                   | Express 5 pasa automáticamente al manejador de errores las promesas rechazadas en handlers `async`.                                              |
+| Base de datos                    | MongoDB 8 (local en Docker, Atlas en producción) + Mongoose 9.x                 | —                                                                                                                                                |
+| Validación                       | Zod 4.x                                                                         | Se valida todo lo que entra: body, query, params, variables de entorno y **respuestas de APIs externas**.                                        |
+| Logging                          | pino 10.x (JSON)                                                                | Logs estructurados, legibles por plataformas como Render.                                                                                        |
+| Autenticación                    | Firebase Auth (el backend solo verifica ID tokens con `firebase-admin` 14.x)    | Decisión tuya.                                                                                                                                   |
+| Proveedor de precios             | CoinGecko, plan Demo (gratis, con API key)                                      | 100 llamadas/min y **10.000 llamadas/mes**.                                                                                                      |
+| Moneda de cotización             | Solo USD                                                                        | Simplifica modelo y agregaciones. Multi-moneda queda fuera de alcance.                                                                           |
+| Intervalo de polling por defecto | Cada 10 minutos                                                                 | Cada 10 min ≈ 4.464 llamadas en un mes de 31 días. Cada 5 min ≈ 8.928, demasiado cerca del tope de 10.000 si sumás seeds y ejecuciones manuales. |
+| Tests                            | Vitest 5 + supertest 7 + mongodb-memory-server 11, **requeridos en cada etapa** | Decisión tuya.                                                                                                                                   |
+| Email                            | Nodemailer 10 vía SMTP                                                          | Mailpit en local, proveedor SMTP en producción.                                                                                                  |
+| Scheduler                        | node-cron 4 (etapas 1–5) → Agenda 6 (etapa 6) → BullMQ 6 opcional (etapa 8)     | Progresión didáctica.                                                                                                                            |
 
 ## 4. Estructura de carpetas
 
@@ -98,6 +98,7 @@ tests/
 ## 5. Convenciones de API
 
 ### 5.1 Rutas
+
 - Prefijo: `/api/v1`. Recursos en plural y kebab-case (`/api/v1/job-runs`).
 - Rutas del usuario autenticado bajo `/api/v1/me/...`.
 - Rutas de administración bajo `/api/v1/admin/...`.
@@ -117,19 +118,19 @@ tests/
 }
 ```
 
-| code | HTTP | Cuándo |
-| --- | --- | --- |
-| `VALIDATION_ERROR` | 400 | Body, query o params inválidos |
-| `UNAUTHENTICATED` | 401 | Falta el token o es inválido |
-| `TOKEN_EXPIRED` | 401 | Token vencido |
-| `FORBIDDEN` | 403 | Autenticado pero sin permiso |
-| `NOT_FOUND` | 404 | Recurso o ruta inexistente |
-| `CONFLICT` | 409 | Duplicado (por ejemplo, moneda ya en la watchlist) |
-| `UNPROCESSABLE` | 422 | Petición válida en forma pero no aplicable (por ejemplo, límite alcanzado) |
-| `RATE_LIMITED` | 429 | Superó el rate limit de la API |
-| `UPSTREAM_ERROR` | 502 | Falló un servicio externo (CoinGecko, Firebase, SMTP) |
-| `SERVICE_UNAVAILABLE` | 503 | La base no está disponible |
-| `INTERNAL_ERROR` | 500 | Cualquier error no previsto |
+| code                  | HTTP | Cuándo                                                                     |
+| --------------------- | ---- | -------------------------------------------------------------------------- |
+| `VALIDATION_ERROR`    | 400  | Body, query o params inválidos                                             |
+| `UNAUTHENTICATED`     | 401  | Falta el token o es inválido                                               |
+| `TOKEN_EXPIRED`       | 401  | Token vencido                                                              |
+| `FORBIDDEN`           | 403  | Autenticado pero sin permiso                                               |
+| `NOT_FOUND`           | 404  | Recurso o ruta inexistente                                                 |
+| `CONFLICT`            | 409  | Duplicado (por ejemplo, moneda ya en la watchlist)                         |
+| `UNPROCESSABLE`       | 422  | Petición válida en forma pero no aplicable (por ejemplo, límite alcanzado) |
+| `RATE_LIMITED`        | 429  | Superó el rate limit de la API                                             |
+| `UPSTREAM_ERROR`      | 502  | Falló un servicio externo (CoinGecko, Firebase, SMTP)                      |
+| `SERVICE_UNAVAILABLE` | 503  | La base no está disponible                                                 |
+| `INTERNAL_ERROR`      | 500  | Cualquier error no previsto                                                |
 
 - `details` es opcional. `requestId` siempre está presente.
 - En `production` nunca se devuelve el stack trace ni el mensaje interno de errores no previstos.
@@ -147,18 +148,20 @@ tests/
 - Las respuestas de un solo recurso van como `{ "data": { ... } }`.
 
 ### 5.4 Fechas, números e IDs
+
 - Fechas en ISO 8601, en UTC y con `Z` (`2026-09-16T21:30:00.000Z`). Se guardan como `Date`.
 - Precios como `number` en USD. No se redondea en la base; si hace falta, se redondea al presentar.
 - Hacia afuera, una moneda se identifica por su `coingeckoId` (`bitcoin`), nunca por el `_id` de Mongo. Las alertas y notificaciones sí usan su `_id` como string.
 
 ### 5.5 Headers
+
 - Cada respuesta incluye `X-Request-Id`. Si el cliente mandó uno, se reutiliza; si no, se genera un UUID.
 - `Content-Type: application/json; charset=utf-8`.
 
 ## 6. Configuración y variables de entorno
 
 - `src/config/env.ts` es el **único** lugar donde se lee `process.env`. El resto del código importa un objeto `config` ya validado y tipado.
-- Al arrancar, si falta una variable obligatoria o tiene un formato inválido, el proceso loguea qué variable falla (nunca su valor) y termina con código 1. A esto se le llama *fail fast*.
+- Al arrancar, si falta una variable obligatoria o tiene un formato inválido, el proceso loguea qué variable falla (nunca su valor) y termina con código 1. A esto se le llama _fail fast_.
 - `.env` nunca se commitea. `.env.example` lista todas las variables con valores de ejemplo no sensibles y un comentario por variable.
 - Cada etapa lista las variables nuevas que agrega.
 
@@ -172,19 +175,19 @@ tests/
 
 ## 8. Scripts npm (se completan a medida que avanzan las etapas)
 
-| Script | Qué hace |
-| --- | --- |
-| `dev` | API con recarga automática (`tsx watch src/server.ts`) |
-| `dev:worker` | Worker con recarga automática |
-| `build` | Compila a `dist/` con `tsc` |
-| `start` / `start:worker` | Ejecutan `dist/server.js` / `dist/worker.js` |
-| `typecheck` | `tsc --noEmit` |
-| `lint` / `format` | ESLint / Prettier |
-| `test` / `test:watch` / `test:coverage` | Vitest |
-| `seed:coins` | Etapa 1 |
-| `job:poll-prices` | Etapa 1 (ejecución manual única) |
-| `auth:token` | Etapa 3 (obtiene un ID token de prueba) |
-| `user:set-role` | Etapa 3 |
+| Script                                  | Qué hace                                               |
+| --------------------------------------- | ------------------------------------------------------ |
+| `dev`                                   | API con recarga automática (`tsx watch src/server.ts`) |
+| `dev:worker`                            | Worker con recarga automática                          |
+| `build`                                 | Compila a `dist/` con `tsc`                            |
+| `start` / `start:worker`                | Ejecutan `dist/server.js` / `dist/worker.js`           |
+| `typecheck`                             | `tsc --noEmit`                                         |
+| `lint` / `format`                       | ESLint / Prettier                                      |
+| `test` / `test:watch` / `test:coverage` | Vitest                                                 |
+| `seed:coins`                            | Etapa 1                                                |
+| `job:poll-prices`                       | Etapa 1 (ejecución manual única)                       |
+| `auth:token`                            | Etapa 3 (obtiene un ID token de prueba)                |
+| `user:set-role`                         | Etapa 3                                                |
 
 ## 9. Testing (reglas globales)
 

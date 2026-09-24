@@ -1,6 +1,6 @@
 ## Why
 
-Every endpoint `api-rest` added is public, and the admin surface is guarded by a single shared `X-Admin-Key` that has no identity, no rotation story and no per-caller accountability. Before the project can hold per-user data — watchlists in the next stage, price alerts two stages later — it needs to know *who* is calling. This stage delegates identity to Firebase Auth (the backend only verifies ID tokens and never sees a password), creates the user's profile in Mongo the first time a valid token appears, and replaces the provisional admin key with an authenticated `admin` role.
+Every endpoint `api-rest` added is public, and the admin surface is guarded by a single shared `X-Admin-Key` that has no identity, no rotation story and no per-caller accountability. Before the project can hold per-user data — watchlists in the next stage, price alerts two stages later — it needs to know _who_ is calling. This stage delegates identity to Firebase Auth (the backend only verifies ID tokens and never sees a password), creates the user's profile in Mongo the first time a valid token appears, and replaces the provisional admin key with an authenticated `admin` role.
 
 ## What Changes
 
@@ -18,6 +18,7 @@ Every endpoint `api-rest` added is public, and the admin surface is guarded by a
 ## Capabilities
 
 ### New Capabilities
+
 - `firebase-admin-init`: single-initialization of the Firebase Admin app, private-key newline normalization, emulator detection with a `warn` log, the hard refusal to run the emulator in `production`, and fail-fast configuration when credentials are missing and no emulator is configured.
 - `token-verification`: the `TokenVerifier` contract, its real `verifyIdToken`-based implementation, the fixed Firebase-error-to-`AppError` translation table, the `FakeTokenVerifier` used by tests, and the rule that the verifier is injected through `createApp(deps)`.
 - `auth-middleware`: `requireAuth` — Bearer scheme parsing, the pre-verification length cap, the `checkRevoked` option, population of `req.auth` and `req.user`, the prohibition on accepting tokens from query strings or bodies, and the guarantee that tokens are never logged — together with the `Request` type augmentation and the `getUser(req)` helper.
@@ -28,6 +29,7 @@ Every endpoint `api-rest` added is public, and the admin surface is guarded by a
 - `auth-dev-scripts`: `auth:create-test-user`, `auth:token` (printing only the ID token to stdout so it can be captured into a shell variable) and `user:set-role`, their production refusal, and the documented Firebase Auth emulator workflow.
 
 ### Modified Capabilities
+
 - `admin-api-key`: **removed entirely** — the `requireAdminKey` middleware, the `X-Admin-Key` header contract and the `ADMIN_API_KEY` variable are deleted and replaced by authenticated role checks.
 - `admin-job-runs-api`: the two job-run endpoints are now guarded by `requireAuth({ checkRevoked: true })` + `requireRole('admin')` instead of the admin key; a request with no token receives 401 and an authenticated non-admin receives 403.
 

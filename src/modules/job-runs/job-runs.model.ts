@@ -1,6 +1,11 @@
 import { Schema, model, type HydratedDocument, type InferSchemaType } from 'mongoose';
 import { config } from '../../config/env.js';
 
+/**
+ * Modelo de Mongoose para `job_runs`: historial de ejecuciones de jobs, con
+ * los enums de estado/disparador/motivo de omisión y sus índices.
+ */
+
 export const JOB_STATUSES = ['running', 'success', 'partial', 'failed', 'skipped'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
@@ -19,9 +24,10 @@ const jobRunErrorSchema = new Schema(
 );
 
 /**
- * `job_runs`: execution history for every job run. A normal collection.
- * `_id` doubles as the `runId` used in logs. TTL retention keeps the
- * collection from growing unbounded (`JOB_RUNS_RETENTION_DAYS`, default 30).
+ * `job_runs`: historial de ejecución de cada corrida de job. Una colección
+ * normal. `_id` también funciona como el `runId` usado en los logs. La
+ * retención TTL evita que la colección crezca sin límite
+ * (`JOB_RUNS_RETENTION_DAYS`, 30 por defecto).
  */
 const jobRunSchema = new Schema(
   {
@@ -39,8 +45,9 @@ const jobRunSchema = new Schema(
       skippedUnchanged: { type: Number, required: true, default: 0 },
       missingCoins: { type: [String], required: true, default: [] },
       upstreamAttempts: { type: Number, required: true, default: 0 },
+      latestUpdated: { type: Number, required: true, default: 0 },
     },
-    // Only { code, message } — never a stack trace or a secret.
+    // Solo { code, message } — nunca un stack trace ni un secreto.
     error: { type: jobRunErrorSchema, default: null },
     workerId: { type: String, required: true },
   },

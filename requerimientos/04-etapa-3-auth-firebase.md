@@ -15,7 +15,7 @@ La API de lectura es pública. Las rutas `/admin` usan `X-Admin-Key`. No existe 
 - **Autenticación (authN):** confirmar quién sos.
 - **Autorización (authZ):** decidir qué podés hacer, una vez que se sabe quién sos.
 - **Proveedor de identidad:** servicio externo que maneja registro, login, contraseñas y recuperación. Acá es Firebase Auth. Tu backend **nunca** ve ni guarda contraseñas.
-- **ID token de Firebase:** un JWT (JSON Web Token) que Firebase emite al hacer login y que dura 1 hora. Tiene tres partes: header, payload (los *claims*: `uid`, `email`, `email_verified`, `exp`...) y firma. El cliente lo manda en cada request con `Authorization: Bearer <token>`.
+- **ID token de Firebase:** un JWT (JSON Web Token) que Firebase emite al hacer login y que dura 1 hora. Tiene tres partes: header, payload (los _claims_: `uid`, `email`, `email_verified`, `exp`...) y firma. El cliente lo manda en cada request con `Authorization: Bearer <token>`.
 - **Verificación del token:** `firebase-admin` comprueba la firma con las claves públicas de Google (las descarga y las cachea), que el token sea para tu proyecto (`aud`), que lo haya emitido Firebase (`iss`) y que no esté vencido (`exp`). No hace falta consultar a Firebase en cada request, salvo que se pida verificar la **revocación**, que sí hace una llamada extra.
 - **Refresh token:** credencial de larga duración que el cliente usa para obtener ID tokens nuevos. El backend no la maneja.
 - **Provisioning JIT (just-in-time):** crear el usuario en tu base la primera vez que llega con un token válido, en lugar de tener un endpoint de registro.
@@ -28,6 +28,7 @@ La API de lectura es pública. Las rutas `/admin` usan `X-Admin-Key`. No existe 
 ## 4. Alcance
 
 **Incluye**
+
 - Inicialización de `firebase-admin`.
 - Abstracción `TokenVerifier` con una implementación real y una falsa para tests.
 - Middlewares `requireAuth` y `requireRole`.
@@ -39,6 +40,7 @@ La API de lectura es pública. Las rutas `/admin` usan `X-Admin-Key`. No existe 
 - Soporte del emulador de Firebase Auth en desarrollo.
 
 **No incluye**
+
 - Login o registro propios, manejo de contraseñas y OAuth social (lo hace Firebase).
 - Email de notificación distinto del email de la cuenta (ver RF-3.6).
 - Custom claims de Firebase para roles (el rol vive en Mongo).
@@ -55,22 +57,23 @@ La API de lectura es pública. Las rutas `/admin` usan `X-Admin-Key`. No existe 
 
 ### `users`
 
-| Campo | Tipo | Reglas |
-| --- | --- | --- |
-| `_id` | ObjectId | Se usa internamente como `userId` en otras colecciones |
-| `firebaseUid` | string | Obligatorio, único |
-| `email` | string \| null | Minúsculas. Se sincroniza desde el token. |
-| `emailVerified` | boolean | Se sincroniza desde el token |
-| `displayName` | string \| null | 1–50 caracteres; se aplica trim |
-| `role` | enum `user` \| `admin` | Default `user` |
-| `lastSeenAt` | Date | — |
-| `createdAt` / `updatedAt` | Date | `timestamps: true` |
+| Campo                     | Tipo                   | Reglas                                                 |
+| ------------------------- | ---------------------- | ------------------------------------------------------ |
+| `_id`                     | ObjectId               | Se usa internamente como `userId` en otras colecciones |
+| `firebaseUid`             | string                 | Obligatorio, único                                     |
+| `email`                   | string \| null         | Minúsculas. Se sincroniza desde el token.              |
+| `emailVerified`           | boolean                | Se sincroniza desde el token                           |
+| `displayName`             | string \| null         | 1–50 caracteres; se aplica trim                        |
+| `role`                    | enum `user` \| `admin` | Default `user`                                         |
+| `lastSeenAt`              | Date                   | —                                                      |
+| `createdAt` / `updatedAt` | Date                   | `timestamps: true`                                     |
 
 Índices: `{ firebaseUid: 1 }` único y `{ email: 1 }` no único (sirve para buscar desde los scripts).
 
 ## 7. Requerimientos funcionales
 
 ### RF-3.1 Inicialización de Firebase Admin
+
 - `src/integrations/firebase/admin.ts` inicializa la app **una sola vez**: si `getApps()` ya tiene una, la reutiliza.
 - `FIREBASE_PRIVATE_KEY` puede venir con los saltos de línea escapados (`\n` literal). Se normalizan con `replace(/\\n/g, '\n')`.
 - Si `FIREBASE_AUTH_EMULATOR_HOST` está definida:
@@ -79,26 +82,34 @@ La API de lectura es pública. Las rutas `/admin` usan `X-Admin-Key`. No existe 
 - Si faltan credenciales y no hay emulador, la config falla al arrancar (fail fast).
 
 ### RF-3.2 `TokenVerifier`
+
 ```ts
 interface TokenVerifier {
   verify(idToken: string, opts?: { checkRevoked?: boolean }): Promise<VerifiedIdentity>;
 }
-type VerifiedIdentity = { uid: string; email: string | null; emailVerified: boolean; name: string | null };
+type VerifiedIdentity = {
+  uid: string;
+  email: string | null;
+  emailVerified: boolean;
+  name: string | null;
+};
 ```
+
 - La implementación real usa `getAuth().verifyIdToken(token, checkRevoked)` y traduce los errores:
 
-| Error de Firebase | Error de la app |
-| --- | --- |
-| `auth/id-token-expired` | `UnauthenticatedError` con código `TOKEN_EXPIRED` |
-| `auth/id-token-revoked` | `UnauthenticatedError` (`TOKEN_REVOKED`) |
-| `auth/user-disabled` | `ForbiddenError` (`USER_DISABLED`) |
-| `auth/argument-error` y otros errores de formato o firma | `UnauthenticatedError` (`UNAUTHENTICATED`) |
-| Error de red al verificar revocación | `UpstreamError` (`FIREBASE_UNAVAILABLE`) |
+| Error de Firebase                                        | Error de la app                                   |
+| -------------------------------------------------------- | ------------------------------------------------- |
+| `auth/id-token-expired`                                  | `UnauthenticatedError` con código `TOKEN_EXPIRED` |
+| `auth/id-token-revoked`                                  | `UnauthenticatedError` (`TOKEN_REVOKED`)          |
+| `auth/user-disabled`                                     | `ForbiddenError` (`USER_DISABLED`)                |
+| `auth/argument-error` y otros errores de formato o firma | `UnauthenticatedError` (`UNAUTHENTICATED`)        |
+| Error de red al verificar revocación                     | `UpstreamError` (`FIREBASE_UNAVAILABLE`)          |
 
 - `FakeTokenVerifier` (solo en tests) resuelve tokens según un mapa fijo (`"token-user-1" → { uid: "u1", ... }`) y puede simular cada uno de los errores.
 - El verifier se inyecta en `createApp(deps)`.
 
 ### RF-3.3 Middleware `requireAuth`
+
 1. Lee `Authorization`. Si falta, o el esquema no es `Bearer` (sin distinguir mayúsculas), o el token está vacío → 401 `UNAUTHENTICATED`.
 2. Rechaza tokens de más de 4.096 caracteres sin verificarlos → 401.
 3. Verifica con `TokenVerifier`. `checkRevoked` sale de la opción del middleware: `requireAuth({ checkRevoked: true })`.
@@ -108,7 +119,9 @@ type VerifiedIdentity = { uid: string; email: string | null; emailVerified: bool
 7. El token nunca se loguea. `redact` de pino cubre `req.headers.authorization`.
 
 ### RF-3.4 Provisioning JIT y sincronización
+
 En `usersService.resolveFromIdentity(identity, now)`:
+
 1. `findOne({ firebaseUid })`.
 2. Si no existe: `findOneAndUpdate({ firebaseUid }, { $setOnInsert: { role: 'user', displayName: identity.name, ... }, $set: { email, emailVerified, lastSeenAt: now } }, { upsert: true, new: true })`.
    - Si falla con `E11000` (otro request lo creó al mismo tiempo), se reintenta **una vez** con `findOne`.
@@ -120,56 +133,76 @@ En `usersService.resolveFromIdentity(identity, now)`:
 4. Devuelve el usuario.
 
 ### RF-3.5 Middleware `requireRole(...roles)`
+
 - Se usa siempre después de `requireAuth`.
 - Si `req.user.role` no está en la lista, responde 403 `FORBIDDEN`.
 - Se aplica a todo `/api/v1/admin/*`: `requireAuth({ checkRevoked: true })` + `requireRole('admin')`.
 - Se eliminan `requireAdminKey` y `ADMIN_API_KEY` (etapa 2).
 
 ### RF-3.6 Endpoints del usuario
+
 Todos requieren `requireAuth`.
 
 **`GET /api/v1/me`** → 200
+
 ```json
-{ "data": { "id": "665f...", "email": "nico@example.com", "emailVerified": true, "displayName": "Nico", "role": "user", "createdAt": "..." } }
+{
+  "data": {
+    "id": "665f...",
+    "email": "nico@example.com",
+    "emailVerified": true,
+    "displayName": "Nico",
+    "role": "user",
+    "createdAt": "..."
+  }
+}
 ```
 
 **`PATCH /api/v1/me`**
+
 - Body (Zod `strict`): `{ displayName?: string | null }`. Al menos un campo. Otros campos → 400.
 - 200 con el mismo formato que `GET /me`.
 - El email **no** se puede cambiar desde la API: las notificaciones (etapa 5) van siempre al email verificado de la cuenta de Firebase. Motivo de seguridad: si se pudiera poner cualquier email de notificación, la app podría usarse para mandar correos a terceros.
 
 **`DELETE /api/v1/me`**
+
 - `requireAuth({ checkRevoked: true })`.
 - Borra el documento `users` y, a partir de las etapas 4 y 5, en cascada: watchlist, alertas y notificaciones pendientes.
 - Responde 204.
 - **No** borra la cuenta en Firebase (ver preguntas abiertas). Si el mismo usuario vuelve a llamar con un token válido, se crea un perfil nuevo vacío. Esto se documenta.
 
 ### RF-3.7 Rate limit por usuario
+
 - En las rutas bajo `requireAuth`, un limitador adicional usa como clave `req.auth.uid`: `USER_RATE_LIMIT_PER_MIN` (default 120) requests por minuto.
 - Se registra **después** de `requireAuth` y convive con el límite global por IP.
 
 ### RF-3.8 Scripts de desarrollo (no hay frontend)
 
 **`npm run auth:create-test-user -- --email a@b.com --password secret123 [--admin]`**
+
 - Usa `getAuth().createUser({ email, password, emailVerified: true })`, contra el emulador o el proyecto de desarrollo.
 - Con `--admin`, además crea el perfil en Mongo con `role: admin`.
 - Se niega a correr si `NODE_ENV=production`.
 
 **`npm run auth:token -- --email a@b.com --password secret123`**
+
 - Llama a la REST API de Firebase Auth: `POST https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=<FIREBASE_WEB_API_KEY>` con `{ email, password, returnSecureToken: true }`.
 - Con emulador, la URL es `http://<FIREBASE_AUTH_EMULATOR_HOST>/identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=cualquiera`.
 - Imprime **solo** el `idToken` por stdout, para poder hacer `TOKEN=$(npm run -s auth:token -- ...)`.
 - Se niega a correr si `NODE_ENV=production`.
 
 **`npm run user:set-role -- --email a@b.com --role admin`**
+
 - Busca el usuario en Mongo por email. Si no existe, muestra el error "el usuario debe haber llamado a la API al menos una vez o haberse creado con `auth:create-test-user`".
 - Actualiza el rol e imprime el cambio (antes → después).
 
 **Emulador**
+
 - Documentar en el README cómo levantarlo con `firebase-tools`: `firebase emulators:start --only auth`. Requiere Java instalado; verificar la versión exigida en la documentación de Firebase.
 - Con `FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099`, tanto `firebase-admin` como los scripts apuntan al emulador.
 
 ### RF-3.9 Tipos
+
 - `src/types/express.d.ts` extiende `Express.Request` con `id: string`, `auth?: { uid; email; emailVerified }` y `user?: UserDoc`.
 - Helper `getUser(req)` que devuelve `UserDoc` o lanza `UnauthenticatedError`, para no usar `req.user!` en los controllers.
 
@@ -183,15 +216,15 @@ Todos requieren `requireAuth`.
 
 ## 9. Variables de entorno nuevas
 
-| Variable | Obligatoria | Uso |
-| --- | --- | --- |
-| `FIREBASE_PROJECT_ID` | Sí | — |
-| `FIREBASE_CLIENT_EMAIL` | Sí, salvo con emulador | Del JSON del service account |
-| `FIREBASE_PRIVATE_KEY` | Sí, salvo con emulador | Del JSON del service account. **Secreto.** |
-| `FIREBASE_WEB_API_KEY` | Solo para `auth:token` fuera del emulador | Configuración web del proyecto |
-| `FIREBASE_AUTH_EMULATOR_HOST` | No | `127.0.0.1:9099` en desarrollo |
-| `USER_RATE_LIMIT_PER_MIN` | No (default 120) | — |
-| `LAST_SEEN_THROTTLE_MIN` | No (default 5) | — |
+| Variable                      | Obligatoria                               | Uso                                        |
+| ----------------------------- | ----------------------------------------- | ------------------------------------------ |
+| `FIREBASE_PROJECT_ID`         | Sí                                        | —                                          |
+| `FIREBASE_CLIENT_EMAIL`       | Sí, salvo con emulador                    | Del JSON del service account               |
+| `FIREBASE_PRIVATE_KEY`        | Sí, salvo con emulador                    | Del JSON del service account. **Secreto.** |
+| `FIREBASE_WEB_API_KEY`        | Solo para `auth:token` fuera del emulador | Configuración web del proyecto             |
+| `FIREBASE_AUTH_EMULATOR_HOST` | No                                        | `127.0.0.1:9099` en desarrollo             |
+| `USER_RATE_LIMIT_PER_MIN`     | No (default 120)                          | —                                          |
+| `LAST_SEEN_THROTTLE_MIN`      | No (default 5)                            | —                                          |
 
 Se elimina `ADMIN_API_KEY`.
 
@@ -225,6 +258,7 @@ Se elimina `ADMIN_API_KEY`.
 ## 12. Testing requerido
 
 **Unitarios**
+
 - Traducción de errores de Firebase a errores de la app (con errores simulados que tengan el `code` correspondiente).
 - `requireAuth` con `FakeTokenVerifier`: E3-1, E3-2 y E3-3, más token demasiado largo y token por query ignorado.
 - `requireRole`.
@@ -232,6 +266,7 @@ Se elimina `ADMIN_API_KEY`.
 - Enmascarado de email.
 
 **Integración** (supertest + mongodb-memory-server + `FakeTokenVerifier`)
+
 - E3-4, E3-5 (con `Promise.all`), E3-8, E3-9, E3-10, E3-11 y E3-12.
 - Normalización de la private key (unitario).
 

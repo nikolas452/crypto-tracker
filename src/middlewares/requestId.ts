@@ -1,27 +1,35 @@
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 
+/**
+ * Middleware que asigna un id único a cada request (nuevo o reutilizado del
+ * header entrante) y lo expone tanto en `req.id` como en la respuesta.
+ */
+
 const REQUEST_ID_HEADER = 'x-request-id';
 const MAX_REQUEST_ID_LENGTH = 128;
 
 /**
- * `req.id` is typed as pino-http's `ReqId` (`string | number | object`)
- * because `pino-http`'s own type declarations augment `http.IncomingMessage`
- * globally (and Express's `Request` extends `IncomingMessage`). This app
- * only ever assigns a `string` to it — see {@link readRequestId} for the
- * narrowing helper used wherever call sites need a `string`.
+ * `req.id` está tipado como el `ReqId` de pino-http (`string | number |
+ * object`) porque las propias declaraciones de tipos de `pino-http` extienden
+ * `http.IncomingMessage` globalmente (y el `Request` de Express extiende
+ * `IncomingMessage`). Esta app solo le asigna un `string`; ver
+ * {@link readRequestId} para el helper de acotamiento de tipo usado
+ * dondequiera que un call site necesite un `string`.
  */
 
 /**
- * Reuses the incoming `X-Request-Id` header when present and no longer than
- * 128 characters; otherwise generates a new UUID v4. Stores the result on
- * `req.id` and echoes it back via the `X-Request-Id` response header.
+ * Reutiliza el header `X-Request-Id` entrante cuando está presente y no
+ * supera los 128 caracteres; si no, genera un nuevo UUID v4. Guarda el
+ * resultado en `req.id` y lo devuelve mediante el header de respuesta
+ * `X-Request-Id`.
  */
 export function requestId(req: Request, res: Response, next: NextFunction): void {
   const incoming = req.header(REQUEST_ID_HEADER);
-  const id = incoming && incoming.length > 0 && incoming.length <= MAX_REQUEST_ID_LENGTH
-    ? incoming
-    : randomUUID();
+  const id =
+    incoming && incoming.length > 0 && incoming.length <= MAX_REQUEST_ID_LENGTH
+      ? incoming
+      : randomUUID();
 
   req.id = id;
   res.setHeader('X-Request-Id', id);
@@ -29,10 +37,11 @@ export function requestId(req: Request, res: Response, next: NextFunction): void
 }
 
 /**
- * Narrows `req.id` (typed as pino-http's `ReqId` union) back to `string` for
- * call sites that need it — this app never assigns anything else to it.
- * Accepts anything with an `id` property so it works for both the plain
- * `IncomingMessage` pino-http hands to `genReqId` and the Express `Request`.
+ * Acota `req.id` (tipado como la unión `ReqId` de pino-http) de vuelta a
+ * `string` para los call sites que lo necesitan — esta app nunca le asigna
+ * otra cosa. Acepta cualquier valor con una propiedad `id` para funcionar
+ * tanto con el `IncomingMessage` plano que pino-http pasa a `genReqId` como
+ * con el `Request` de Express.
  */
 export function readRequestId(req: { id?: unknown }): string {
   return typeof req.id === 'string' ? req.id : String(req.id ?? '');

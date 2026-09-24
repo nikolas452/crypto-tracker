@@ -5,6 +5,7 @@
 ## 1. Objetivo
 
 Tener la API y el procesamiento de jobs corriendo en la nube, conectados a MongoDB Atlas, con:
+
 - Configuración reproducible (`render.yaml`).
 - Secretos fuera del repo.
 - Deploy automático solo si pasa el CI.
@@ -18,13 +19,13 @@ Todo funciona en local con Docker (Mongo en replica set + Mailpit), un worker co
 ## 3. Conceptos nuevos de la etapa
 
 - **Build vs start:**
-  - *Build* instala dependencias y compila TypeScript a JavaScript (`dist/`). Corre una vez por deploy.
-  - *Start* ejecuta el JavaScript compilado. Corre cada vez que arranca una instancia.
+  - _Build_ instala dependencias y compila TypeScript a JavaScript (`dist/`). Corre una vez por deploy.
+  - _Start_ ejecuta el JavaScript compilado. Corre cada vez que arranca una instancia.
   - En producción no se usa `tsx` ni se compila al arrancar.
-- **Infraestructura como código (IaC):** describir los servicios, comandos y variables en un archivo versionado (`render.yaml`, que Render llama *Blueprint*) en lugar de configurarlos a mano en un panel. Es la misma idea que Terraform o los manifiestos de Kubernetes, a menor escala.
+- **Infraestructura como código (IaC):** describir los servicios, comandos y variables en un archivo versionado (`render.yaml`, que Render llama _Blueprint_) en lugar de configurarlos a mano en un panel. Es la misma idea que Terraform o los manifiestos de Kubernetes, a menor escala.
 - **Environment group:** conjunto de variables compartidas entre servicios, para no duplicar secretos.
 - **Zero-downtime deploy:** la plataforma levanta la instancia nueva, espera a que el health check responda bien y recién ahí le pasa el tráfico y apaga la vieja (con `SIGTERM`, que tu apagado ordenado maneja).
-- **Spin down:** en el plan gratuito, Render apaga un web service después de 15 minutos sin tráfico. El siguiente request lo vuelve a levantar, lo que tarda alrededor de 1 minuto (*cold start*).
+- **Spin down:** en el plan gratuito, Render apaga un web service después de 15 minutos sin tráfico. El siguiente request lo vuelve a levantar, lo que tarda alrededor de 1 minuto (_cold start_).
 - **Allowlist de IPs:** lista de direcciones desde las que Atlas acepta conexiones.
 - **Principio de menor privilegio:** cada credencial tiene solo los permisos que necesita (por ejemplo, un usuario de Atlas con `readWrite` sobre una sola base).
 - **Smoke test:** prueba rápida posterior al deploy que confirma que lo esencial responde.
@@ -34,14 +35,14 @@ Todo funciona en local con Docker (Mongo en replica set + Mailpit), un worker co
 
 Según la documentación de Render, **los Background Workers y los Cron Jobs no tienen instancia gratuita**. Solo los web services (y Postgres, Key Value y sitios estáticos) la tienen. Además, un web service gratuito se apaga a los 15 minutos sin tráfico, así que no puede alojar un scheduler que corra solo.
 
-| | Opción A — Web Service + Background Worker | Opción B — Web Service gratis + disparo externo |
-| --- | --- | --- |
-| Costo | Worker en instancia paga (consultar precio en render.com/pricing). La API puede ser gratis o paga. | $0 |
-| Cómo se disparan los jobs | Agenda en el worker, igual que en local | Un workflow programado de GitHub Actions llama cada 10 minutos a un endpoint interno de la API, que ejecuta el ciclo en el mismo proceso |
-| Separación API / worker | Real | No: el ciclo corre dentro de la API |
-| Confiabilidad | Alta | GitHub avisa que los workflows programados pueden demorarse en momentos de alta carga (sobre todo al inicio de cada hora), el intervalo mínimo es 5 minutos, y en repos **públicos** se deshabilitan tras 60 días sin actividad |
-| Cold start | No aplica al worker | Cada disparo puede despertar la API (≈ 1 min) |
-| Lo que aprendés | Workers reales, drain, varias instancias | Endpoints internos, autenticación máquina a máquina, GitHub Actions programados |
+|                           | Opción A — Web Service + Background Worker                                                         | Opción B — Web Service gratis + disparo externo                                                                                                                                                                                 |
+| ------------------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Costo                     | Worker en instancia paga (consultar precio en render.com/pricing). La API puede ser gratis o paga. | $0                                                                                                                                                                                                                              |
+| Cómo se disparan los jobs | Agenda en el worker, igual que en local                                                            | Un workflow programado de GitHub Actions llama cada 10 minutos a un endpoint interno de la API, que ejecuta el ciclo en el mismo proceso                                                                                        |
+| Separación API / worker   | Real                                                                                               | No: el ciclo corre dentro de la API                                                                                                                                                                                             |
+| Confiabilidad             | Alta                                                                                               | GitHub avisa que los workflows programados pueden demorarse en momentos de alta carga (sobre todo al inicio de cada hora), el intervalo mínimo es 5 minutos, y en repos **públicos** se deshabilitan tras 60 días sin actividad |
+| Cold start                | No aplica al worker                                                                                | Cada disparo puede despertar la API (≈ 1 min)                                                                                                                                                                                   |
+| Lo que aprendés           | Workers reales, drain, varias instancias                                                           | Endpoints internos, autenticación máquina a máquina, GitHub Actions programados                                                                                                                                                 |
 
 **Recomendación:** si podés pagar el worker, **A**, porque es lo que este proyecto viene a enseñar. Si no, **B** para arrancar, dejando el código listo para A (los requerimientos cubren las dos). Una alternativa intermedia es la API gratis con un worker pago en la instancia más chica.
 
@@ -50,6 +51,7 @@ Los requerimientos de abajo marcan **[A]**, **[B]** o nada si aplican a ambas.
 ## 5. Alcance
 
 **Incluye**
+
 - Build de producción.
 - `render.yaml`.
 - Configuración de Atlas.
@@ -65,6 +67,7 @@ Los requerimientos de abajo marcan **[A]**, **[B]** o nada si aplican a ambas.
 - Runbook.
 
 **No incluye**
+
 - Dominio propio y DNS (opcional).
 - Docker (se usa el runtime nativo de Node de Render; Docker queda para tu ruta de DevOps).
 - Varios entornos (staging) (opcional, en preguntas abiertas).
@@ -72,6 +75,7 @@ Los requerimientos de abajo marcan **[A]**, **[B]** o nada si aplican a ambas.
 ## 6. Requerimientos funcionales
 
 ### RF-7.1 Build de producción
+
 - `npm run build` compila con `tsc -p tsconfig.build.json` a `dist/`, excluyendo los tests.
 - Comandos en Render:
   - Build: `npm ci && npm run build`.
@@ -81,6 +85,7 @@ Los requerimientos de abajo marcan **[A]**, **[B]** o nada si aplican a ambas.
 - El arranque en producción no depende de `tsx`, `pino-pretty` ni otras herramientas de desarrollo. Si `pino-pretty` está en `devDependencies`, el logger no debe intentar cargarlo con `NODE_ENV=production`.
 
 ### RF-7.2 Blueprint `render.yaml`
+
 Versionado en la raíz. Estructura mínima:
 
 ```yaml
@@ -105,8 +110,8 @@ services:
   - type: web
     name: crypto-tracker-api
     runtime: node
-    region: oregon            # elegir la región más cercana a la región de Atlas
-    plan: free                # o el plan pago elegido
+    region: oregon # elegir la región más cercana a la región de Atlas
+    plan: free # o el plan pago elegido
     buildCommand: npm ci && npm run build
     startCommand: node dist/server.js
     healthCheckPath: /health/ready
@@ -114,11 +119,11 @@ services:
     envVars:
       - fromGroup: crypto-tracker-shared
       - key: TRUST_PROXY
-        value: "1"
-      - key: INTERNAL_API_KEY   # solo [B]
+        value: '1'
+      - key: INTERNAL_API_KEY # solo [B]
         generateValue: true
 
-  - type: worker              # solo [A]
+  - type: worker # solo [A]
     name: crypto-tracker-worker
     runtime: node
     region: oregon
@@ -133,12 +138,14 @@ services:
 ```
 
 Reglas:
+
 - Ningún secreto con `value:` en el archivo. Siempre `sync: false` (se cargan en el panel) o `generateValue: true`.
 - `autoDeployTrigger: checksPass`: Render despliega solo si los checks de GitHub (el CI) pasaron en ese commit.
 - La región de Render se elige cerca de la de Atlas, para bajar la latencia de cada consulta.
 - Validar el archivo contra la especificación de Blueprints de Render antes de aplicarlo. Los nombres de campos citados acá salen de su documentación.
 
 ### RF-7.3 MongoDB Atlas
+
 - Cluster M0 (gratis) en la misma región o una cercana a Render. Límites relevantes del M0 según la documentación de Atlas:
   - 0,5 GB de almacenamiento.
   - 100 operaciones por segundo.
@@ -158,6 +165,7 @@ Reglas:
 - `maxPoolSize` explícito (por ejemplo, 10 por proceso) para no acercarse al límite de conexiones.
 
 ### RF-7.4 Configuración de producción
+
 - Con `NODE_ENV=production`, `env.ts` exige además:
   - `MAIL_FROM` y `SMTP_*` (en el worker, o en la API **[B]**).
   - `FIREBASE_*` (sin emulador).
@@ -168,6 +176,7 @@ Reglas:
 - Variables de desarrollo **prohibidas** en producción: `FIREBASE_AUTH_EMULATOR_HOST` (ya validado en la etapa 3) y `FIREBASE_WEB_API_KEY` (solo la usan los scripts locales).
 
 ### RF-7.5 Índices y colecciones en producción
+
 - Script `npm run db:setup`, idempotente:
   - `ensureCollections()`.
   - `Model.syncIndexes()` para cada modelo. Crea los índices que faltan y **borra los que no están en el schema**. Por eso se loguea el diff antes de aplicarlo y, con `--dry-run`, solo lo muestra.
@@ -177,6 +186,7 @@ Reglas:
 - Motivo: con `autoIndex` activo, Mongoose crea índices en cada arranque. En colecciones grandes eso puede bloquear o cargar la base justo durante un deploy.
 
 ### RF-7.6 Seguridad HTTP en producción
+
 - `helmet` con HSTS (Render termina TLS y la app solo se sirve por HTTPS).
 - CORS sigue deshabilitado.
 - `trust proxy` = 1, verificado con un endpoint de diagnóstico **solo para admin** (`GET /api/v1/admin/debug/ip`) que devuelve `req.ip` y `req.ips`.
@@ -184,6 +194,7 @@ Reglas:
 - Errores sin stack (etapa 0).
 
 ### RF-7.7 Endpoint interno **[B]**
+
 `POST /api/v1/internal/jobs/run-cycle`
 
 - **Autenticación:** header `X-Internal-Key`, comparado en tiempo constante con `INTERNAL_API_KEY`. Si falta o no coincide, 401. Si `INTERNAL_API_KEY` no está configurada, 404.
@@ -201,12 +212,13 @@ Reglas:
 - `WORKER_MODE`: `agenda` **[A]** \| `external` **[B]**.
 
 ### RF-7.8 Workflow de disparo **[B]**
+
 `.github/workflows/run-cycle.yml`:
 
 ```yaml
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: '*/10 * * * *'
   workflow_dispatch: {}
 jobs:
   run-cycle:
@@ -230,6 +242,7 @@ jobs:
 - Si el repo es público, un commit o cualquier actividad cada menos de 60 días evita que GitHub deshabilite el workflow. Documentarlo en el runbook.
 
 ### RF-7.9 Observabilidad y alertas
+
 - **Monitor externo** (por ejemplo, UptimeRobot en plan gratuito, u otro equivalente) con dos checks:
   1. `GET /health` cada 5 minutos: alerta si falla.
   2. Monitor de palabra clave sobre `GET /api/v1/status`: alerta si el body contiene `"stale":true`.
@@ -238,6 +251,7 @@ jobs:
 - Opcional: `POST /api/v1/admin/notifications/test-email` como verificación post-deploy de SMTP.
 
 ### RF-7.10 Smoke test post-deploy
+
 - Script `npm run smoke -- --url https://<api>`. Verifica:
   1. `GET /health` → 200.
   2. `GET /health/ready` → 200.
@@ -248,12 +262,15 @@ jobs:
 - Opcional: un job `smoke` en GitHub Actions disparado por `deployment_status` o manualmente con `workflow_dispatch`.
 
 ### RF-7.11 Datos iniciales en producción
+
 - `seed:coins` se ejecuta **desde tu máquina** con `MONGODB_URI` y `COINGECKO_API_KEY` de producción cargadas temporalmente en la terminal (nunca en `.env` commiteado). Los web services gratuitos no tienen shell.
 - Alternativa: un admin usa `POST /api/v1/admin/coins` (etapa 4).
 - Promover tu usuario a admin con `user:set-role` apuntando a la base de producción.
 
 ### RF-7.12 Runbook (`docs/runbook.md`)
+
 Documento con, como mínimo:
+
 - Cómo desplegar, cómo hacer rollback (Render permite volver a un deploy anterior desde el panel) y cómo rotar cada secreto: Atlas, CoinGecko, Firebase service account, SMTP, `INTERNAL_API_KEY`.
 - Qué hacer si:
   - `/status` está stale.
@@ -276,13 +293,13 @@ Documento con, como mínimo:
 
 ## 8. Variables de entorno nuevas
 
-| Variable | Dónde | Uso |
-| --- | --- | --- |
-| `WORKER_MODE` | API y worker | `agenda` **[A]** / `external` **[B]** |
-| `INTERNAL_API_KEY` | API | Solo **[B]** |
-| `RUN_CYCLE_TIMEOUT_MS` | API | Solo **[B]**. Default 60000. |
-| `MONGODB_MAX_POOL_SIZE` | Ambos | Default 10 |
-| `NODE_VERSION` | Render (opcional) | Tiene prioridad sobre `.node-version` |
+| Variable                | Dónde             | Uso                                   |
+| ----------------------- | ----------------- | ------------------------------------- |
+| `WORKER_MODE`           | API y worker      | `agenda` **[A]** / `external` **[B]** |
+| `INTERNAL_API_KEY`      | API               | Solo **[B]**                          |
+| `RUN_CYCLE_TIMEOUT_MS`  | API               | Solo **[B]**. Default 60000.          |
+| `MONGODB_MAX_POOL_SIZE` | Ambos             | Default 10                            |
+| `NODE_VERSION`          | Render (opcional) | Tiene prioridad sobre `.node-version` |
 
 ## 9. Casos borde
 
@@ -310,15 +327,18 @@ Documento con, como mínimo:
 ## 11. Testing requerido
 
 **Unitarios**
+
 - `env.ts` en modo producción: variables extra obligatorias y prohibidas.
 - Middleware de `X-Internal-Key`: igual que el de la etapa 2, pero con otra variable.
 
 **Integración**
+
 - `run-cycle` **[B]** con CoinGecko y mailer falsos: respuesta 200 con los resúmenes, 500 cuando `poll-prices` falla, 503 con el lease tomado.
 - `POST /admin/jobs/:name/run` con `WORKER_MODE=external` → 409 `NO_CONSUMER`.
 - `db:setup --dry-run` no modifica índices.
 
 **Post-deploy (manual o en CI)**
+
 - E7-1 a E7-11. El smoke test queda automatizado.
 
 ## 12. Preguntas abiertas

@@ -6,7 +6,7 @@
 
 Permitir que un usuario defina alertas sobre una moneda ("avisame si BTC baja de 50.000") y que el worker, después de cada actualización de precios, las evalúe y envíe un email **una sola vez por disparo**, sin perder notificaciones si el envío falla y sin mandar el mismo mail en cada corrida.
 
-Es la etapa central del proyecto en cuanto a jobs: aparecen el patrón outbox, las transacciones, el *claim* atómico de trabajo, los reintentos con backoff y la entrega *at-least-once*.
+Es la etapa central del proyecto en cuanto a jobs: aparecen el patrón outbox, las transacciones, el _claim_ atómico de trabajo, los reintentos con backoff y la entrega _at-least-once_.
 
 ## 2. Contexto
 
@@ -21,16 +21,17 @@ Es la etapa central del proyecto en cuanto a jobs: aparecen el patrón outbox, l
 - **Histéresis:** margen para "rearmar" una alerta. Si el umbral es 50.000 y el precio oscila entre 49.990 y 50.010, sin margen la alerta se dispararía y se rearmaría en cada corrida. Con un margen del 1 %, solo se rearma cuando el precio vuelve a pasar 50.500.
 - **Cooldown:** tiempo mínimo entre dos disparos de la misma alerta, aunque se haya rearmado.
 - **Patrón outbox:** en vez de mandar el email en el mismo momento en que detectás la condición, **guardás** una notificación pendiente en la base, en la misma operación que marca la alerta como disparada. Otro paso lee las pendientes y las envía. Si el envío falla, la notificación sigue ahí para reintentarse. Si el proceso muere, no se pierde nada.
-- **Transacción:** grupo de escrituras que se aplican todas o ninguna. En Mongo requiere un *replica set* (Atlas lo es; en local hay que configurarlo).
+- **Transacción:** grupo de escrituras que se aplican todas o ninguna. En Mongo requiere un _replica set_ (Atlas lo es; en local hay que configurarlo).
 - **Control de concurrencia optimista:** cada alerta tiene un número `version`. Una actualización solo se aplica si la versión sigue siendo la que leíste. Si el usuario editó la alerta mientras el job la evaluaba, la escritura del job no matchea y se descarta.
 - **Claim atómico:** un worker "reserva" una notificación con un `findOneAndUpdate` que cambia su estado de `pending` a `sending` en una sola operación. Si dos workers lo intentan a la vez, solo uno gana.
-- **Entrega at-least-once:** se garantiza que cada notificación se envíe **al menos** una vez. En un caso raro (el proceso muere justo después de enviar y antes de marcar `sent`) puede llegar dos veces. *Exactly-once* en sistemas distribuidos es muy difícil; lo habitual es at-least-once más deduplicación donde se pueda.
+- **Entrega at-least-once:** se garantiza que cada notificación se envíe **al menos** una vez. En un caso raro (el proceso muere justo después de enviar y antes de marcar `sent`) puede llegar dos veces. _Exactly-once_ en sistemas distribuidos es muy difícil; lo habitual es at-least-once más deduplicación donde se pueda.
 - **Error transitorio vs permanente:** un SMTP caído es transitorio (se reintenta). Un destinatario rechazado con código 5xx es permanente (no tiene sentido reintentar).
 - **Dedupe key:** clave única que identifica un evento. Si se intenta crear dos veces, el índice único lo impide.
 
 ## 4. Alcance
 
 **Incluye**
+
 - Modelos `Alert` y `Notification`.
 - CRUD de alertas del usuario e historial de notificaciones.
 - Evaluación de alertas dentro del job `poll-prices`.
@@ -41,6 +42,7 @@ Es la etapa central del proyecto en cuanto a jobs: aparecen el patrón outbox, l
 - Cascada en `DELETE /me`.
 
 **No incluye**
+
 - Otros canales (push, Telegram, webhooks). El modelo deja preparado el campo `channel`.
 - Link de "desuscribirse" con un clic (no hay frontend).
 - Digest o agrupación de varias alertas en un mail.
@@ -58,26 +60,27 @@ Es la etapa central del proyecto en cuanto a jobs: aparecen el patrón outbox, l
 
 ### 6.1 `alerts`
 
-| Campo | Tipo | Reglas |
-| --- | --- | --- |
-| `_id` | ObjectId | Se expone como `id` |
-| `userId` | ObjectId | Obligatorio |
-| `coinId` | ObjectId | Obligatorio |
-| `type` | enum `PRICE_ABOVE` \| `PRICE_BELOW` \| `CHANGE_24H_ABS_GTE` | Inmutable |
-| `threshold` | number | Precio: > 0 y ≤ 1e9. Variación: 0.1–100 (puntos porcentuales). |
-| `mode` | enum `once` \| `recurring` | Default `recurring` |
-| `status` | enum `armed` \| `triggered` \| `completed` \| `disabled` | Default `armed` |
-| `cooldownMinutes` | int | Default 60. Rango 5–10080. |
-| `rearmPct` | number | Default 1. Rango 0–20. |
-| `note` | string \| null | Máximo 200 caracteres |
-| `version` | int | Default 0. Se incrementa en **cada** modificación. |
-| `triggerCount` | int | Default 0 |
-| `lastTriggeredAt` | Date \| null | — |
-| `lastTriggeredValue` | number \| null | Precio o variación al momento del disparo |
-| `lastEvaluatedAt` | Date \| null | — |
-| `createdAt` / `updatedAt` | Date | — |
+| Campo                     | Tipo                                                        | Reglas                                                         |
+| ------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------- |
+| `_id`                     | ObjectId                                                    | Se expone como `id`                                            |
+| `userId`                  | ObjectId                                                    | Obligatorio                                                    |
+| `coinId`                  | ObjectId                                                    | Obligatorio                                                    |
+| `type`                    | enum `PRICE_ABOVE` \| `PRICE_BELOW` \| `CHANGE_24H_ABS_GTE` | Inmutable                                                      |
+| `threshold`               | number                                                      | Precio: > 0 y ≤ 1e9. Variación: 0.1–100 (puntos porcentuales). |
+| `mode`                    | enum `once` \| `recurring`                                  | Default `recurring`                                            |
+| `status`                  | enum `armed` \| `triggered` \| `completed` \| `disabled`    | Default `armed`                                                |
+| `cooldownMinutes`         | int                                                         | Default 60. Rango 5–10080.                                     |
+| `rearmPct`                | number                                                      | Default 1. Rango 0–20.                                         |
+| `note`                    | string \| null                                              | Máximo 200 caracteres                                          |
+| `version`                 | int                                                         | Default 0. Se incrementa en **cada** modificación.             |
+| `triggerCount`            | int                                                         | Default 0                                                      |
+| `lastTriggeredAt`         | Date \| null                                                | —                                                              |
+| `lastTriggeredValue`      | number \| null                                              | Precio o variación al momento del disparo                      |
+| `lastEvaluatedAt`         | Date \| null                                                | —                                                              |
+| `createdAt` / `updatedAt` | Date                                                        | —                                                              |
 
 Índices:
+
 - `{ coinId: 1, status: 1 }`: lo usa la evaluación.
 - `{ userId: 1, createdAt: -1 }`.
 - `{ userId: 1, status: 1 }`.
@@ -99,11 +102,13 @@ stateDiagram-v2
 ```
 
 **Condición de disparo** (`v` = valor actual):
+
 - `PRICE_ABOVE`: `v.priceUsd >= threshold`
 - `PRICE_BELOW`: `v.priceUsd <= threshold`
 - `CHANGE_24H_ABS_GTE`: `|v.change24hPct| >= threshold`. Si `change24hPct` es `null`, no se evalúa.
 
 **Condición de rearme** (solo desde `triggered`):
+
 - `PRICE_ABOVE`: `v.priceUsd < threshold × (1 − rearmPct/100)`
 - `PRICE_BELOW`: `v.priceUsd > threshold × (1 + rearmPct/100)`
 - `CHANGE_24H_ABS_GTE`: `|v.change24hPct| < max(0, threshold − rearmPct)`
@@ -112,26 +117,27 @@ stateDiagram-v2
 
 ### 6.3 `notifications`
 
-| Campo | Tipo | Reglas |
-| --- | --- | --- |
-| `_id` | ObjectId | Se expone como `id` |
-| `userId` | ObjectId | — |
-| `alertId` | ObjectId | — |
-| `channel` | enum `email` | — |
-| `to` | string | Email del usuario **al momento del disparo** |
-| `status` | enum `pending` \| `sending` \| `sent` \| `failed` \| `cancelled` | — |
-| `dedupeKey` | string | **Único**: `${alertId}:${triggerCount}` |
-| `payload` | object | Datos para renderizar: `coingeckoId`, `coinName`, `symbol`, `alertType`, `threshold`, `value`, `priceUsd`, `change24hPct`, `triggeredAt`, `note` |
-| `attempts` | int | Default 0 |
-| `maxAttempts` | int | Default `NOTIFY_MAX_ATTEMPTS` (5) |
-| `nextAttemptAt` | Date | Al crear, `now` |
-| `lockedAt` / `lockedBy` | Date \| null / string \| null | — |
-| `lastError` | `{ code, message, permanent }` \| null | — |
-| `sentAt` | Date \| null | — |
-| `providerMessageId` | string \| null | — |
-| `createdAt` / `updatedAt` | Date | — |
+| Campo                     | Tipo                                                             | Reglas                                                                                                                                           |
+| ------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `_id`                     | ObjectId                                                         | Se expone como `id`                                                                                                                              |
+| `userId`                  | ObjectId                                                         | —                                                                                                                                                |
+| `alertId`                 | ObjectId                                                         | —                                                                                                                                                |
+| `channel`                 | enum `email`                                                     | —                                                                                                                                                |
+| `to`                      | string                                                           | Email del usuario **al momento del disparo**                                                                                                     |
+| `status`                  | enum `pending` \| `sending` \| `sent` \| `failed` \| `cancelled` | —                                                                                                                                                |
+| `dedupeKey`               | string                                                           | **Único**: `${alertId}:${triggerCount}`                                                                                                          |
+| `payload`                 | object                                                           | Datos para renderizar: `coingeckoId`, `coinName`, `symbol`, `alertType`, `threshold`, `value`, `priceUsd`, `change24hPct`, `triggeredAt`, `note` |
+| `attempts`                | int                                                              | Default 0                                                                                                                                        |
+| `maxAttempts`             | int                                                              | Default `NOTIFY_MAX_ATTEMPTS` (5)                                                                                                                |
+| `nextAttemptAt`           | Date                                                             | Al crear, `now`                                                                                                                                  |
+| `lockedAt` / `lockedBy`   | Date \| null / string \| null                                    | —                                                                                                                                                |
+| `lastError`               | `{ code, message, permanent }` \| null                           | —                                                                                                                                                |
+| `sentAt`                  | Date \| null                                                     | —                                                                                                                                                |
+| `providerMessageId`       | string \| null                                                   | —                                                                                                                                                |
+| `createdAt` / `updatedAt` | Date                                                             | —                                                                                                                                                |
 
 Índices:
+
 - `{ dedupeKey: 1 }` único.
 - `{ status: 1, nextAttemptAt: 1 }`: lo usa el claim.
 - `{ status: 1, lockedAt: 1 }`: lo usa la recuperación de envíos colgados.
@@ -144,20 +150,24 @@ stateDiagram-v2
 ## 7. Requerimientos funcionales
 
 ### RF-5.1 Mongo en replica set
+
 - `docker-compose.yml`: el servicio `mongo` corre con `--replSet rs0 --bind_ip_all`, con un healthcheck que ejecuta `rs.initiate()` si todavía no está iniciado.
 - URI local: `mongodb://localhost:27017/?replicaSet=rs0&directConnection=true`.
 - Tests: `MongoMemoryReplSet` con 1 nodo.
 - Al arrancar, la API y el worker verifican que la conexión soporte transacciones (el comando `hello` debe devolver `setName`). Si no, salen con código 1 y un mensaje claro.
 
 ### RF-5.2 Endpoints de alertas del usuario
+
 Todos con `requireAuth`. Siempre se filtra por `userId` (regla de aislamiento de la etapa 4).
 
 **`GET /api/v1/me/alerts`**
+
 - Query: `status` (uno o varios separados por coma), `coingeckoId`, `page`, `limit`.
 - Lista paginada, ordenada por `createdAt` descendente.
 - Cada ítem incluye la moneda (`coingeckoId`, `symbol`, `name`, `isActive`) y `latest.priceUsd` y `latest.change24hPct`.
 
 **`POST /api/v1/me/alerts`**
+
 - Body (Zod `strict`): `{ coingeckoId, type, threshold, mode?, cooldownMinutes?, rearmPct?, note? }`. El rango válido de `threshold` depende de `type` (se valida con un `discriminatedUnion` de Zod o con `superRefine`).
 - Validaciones, en orden:
   1. Body inválido → 400.
@@ -166,6 +176,7 @@ Todos con `requireAuth`. Siempre se filtra por `userId` (regla de aislamiento de
   4. Límite de activas alcanzado → 422 con `reason: LIMIT_REACHED`.
 - Se crea en `armed` y **no** se evalúa en el momento: se evalúa en la próxima corrida del job.
 - 201:
+
 ```json
 {
   "data": {
@@ -185,13 +196,16 @@ Todos con `requireAuth`. Siempre se filtra por `userId` (regla de aislamiento de
   "meta": { "currentValue": 64210.12, "conditionCurrentlyMet": false }
 }
 ```
+
 - `meta.conditionCurrentlyMet` avisa que, si ya se cumple, la alerta va a dispararse en la próxima corrida.
 
 **`GET /api/v1/me/alerts/:id`**
+
 - `id` con formato inválido → 400.
 - Inexistente **o de otro usuario** → 404. Se responde 404 y no 403 para no revelar que el recurso existe.
 
 **`PATCH /api/v1/me/alerts/:id`**
+
 - Body: `{ threshold?, cooldownMinutes?, rearmPct?, note?, mode?, enabled? }`, con al menos un campo.
 - Si viene `type`, responde 400 (es inmutable).
 - Reglas:
@@ -202,15 +216,18 @@ Todos con `requireAuth`. Siempre se filtra por `userId` (regla de aislamiento de
 - 200 con la alerta.
 
 **`DELETE /api/v1/me/alerts/:id`**
+
 - Borra la alerta y pasa a `cancelled` sus notificaciones en `pending`. Las que están en `sending` se dejan terminar.
 - Responde 204 siempre, aunque no exista o sea de otro usuario (en ese caso no borra nada).
 
 **`GET /api/v1/me/notifications`**
+
 - Query: `status`, `page`, `limit`.
 - Devuelve `id`, `alertId`, `status`, `payload`, `attempts`, `sentAt`, `createdAt` y `to` enmascarado.
 - No expone `lockedBy`, `dedupeKey` ni el detalle técnico de `lastError`: si falló, solo `lastError.code`.
 
 ### RF-5.3 Evaluación de alertas dentro de `poll-prices`
+
 Nuevo paso al final del job, después de actualizar `latest`:
 
 1. **Entrada:** el mapa `coinId → valores nuevos` de **esta** corrida (solo las monedas que tuvieron snapshot nuevo).
@@ -229,12 +246,19 @@ Nuevo paso al final del job, después de actualizar `latest`:
 9. Al terminar, si hubo al menos un `TRIGGER`, dispara `send-notifications` enseguida (RF-5.5), respetando su guard de overlap, para que el mail no espere al próximo minuto.
 
 ### RF-5.4 Mailer
+
 ```ts
 interface Mailer {
-  send(msg: { to: string; subject: string; text: string; html: string }): Promise<{ messageId: string }>;
+  send(msg: {
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+  }): Promise<{ messageId: string }>;
   verify(): Promise<void>;
 }
 ```
+
 - `SmtpMailer`: `nodemailer.createTransport({ host, port, secure: port === 465, auth })`, con timeouts de conexión y socket de 10 s.
 - Traducción de errores:
   - Si el error trae `responseCode` entre 500 y 599 → `MailError` con `permanent: true` y `code: SMTP_REJECTED`.
@@ -243,6 +267,7 @@ interface Mailer {
 - Al arrancar el worker, `mailer.verify()`. Si falla, loguea en `error` y **no** detiene el worker: las notificaciones quedan `pending` y se reintentan.
 
 ### RF-5.5 Job `send-notifications`
+
 - Programado con `SEND_NOTIFICATIONS_CRON` (default `* * * * *`, cada minuto). Tiene su propio guard de overlap y registra su propio `JobRun` (`jobName: send-notifications`).
 - Pasos:
   1. **Recuperación de envíos colgados:** las notificaciones en `sending` con `lockedAt < now − NOTIFY_LOCK_TIMEOUT_MIN` (default 10) vuelven a `pending`, con `attempts + 1` y `nextAttemptAt = now`. Suma a `stats.recoveredStale`. Si con ese incremento llegan a `maxAttempts`, pasan a `failed`.
@@ -262,6 +287,7 @@ interface Mailer {
 - Los logs nunca incluyen el email completo del destinatario.
 
 ### RF-5.6 Template de email
+
 - Módulo `src/modules/notifications/templates/alert-triggered.ts`, con una función pura `render(payload) → { subject, text, html }`.
 - **Asunto:**
   - `[Crypto Tracker] BTC por debajo de US$ 50.000,00`
@@ -279,6 +305,7 @@ interface Mailer {
 - HTML simple, con estilos inline y sin imágenes externas ni píxeles de tracking.
 
 ### RF-5.7 Endpoints de admin
+
 Con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`.
 
 - **`GET /api/v1/admin/notifications`**
@@ -293,7 +320,9 @@ Con `requireAuth({ checkRevoked: true })` + `requireRole('admin')`.
   - Sirve para validar la configuración SMTP en cada entorno.
 
 ### RF-5.8 Cascada en `DELETE /me`
+
 Orden:
+
 1. Las notificaciones `pending` del usuario pasan a `cancelled`.
 2. Se borran las alertas.
 3. Se borra la watchlist (etapa 4).
@@ -312,20 +341,20 @@ El historial de notificaciones del usuario se borra también (`deleteMany`), sal
 
 ## 9. Variables de entorno nuevas
 
-| Variable | Default | Uso |
-| --- | --- | --- |
-| `SMTP_HOST` | — (obligatoria en el worker) | Local: `localhost` (Mailpit) |
-| `SMTP_PORT` | 587 | Local: 1025 |
-| `SMTP_USER` / `SMTP_PASS` | — | Opcionales en local. **Secretos.** |
-| `MAIL_FROM` | — | Por ejemplo `Crypto Tracker <alerts@tu-dominio>` |
-| `MAIL_DISPLAY_TIMEZONE` | `America/Argentina/Buenos_Aires` | — |
-| `MAIL_MAX_PER_MINUTE` | 30 | — |
-| `ALERTS_MAX_ACTIVE` | 20 | — |
-| `SEND_NOTIFICATIONS_CRON` | `* * * * *` | — |
-| `NOTIFY_BATCH_SIZE` | 20 | — |
-| `NOTIFY_MAX_ATTEMPTS` | 5 | — |
-| `NOTIFY_LOCK_TIMEOUT_MIN` | 10 | — |
-| `NOTIFICATIONS_RETENTION_DAYS` | 90 | — |
+| Variable                       | Default                          | Uso                                              |
+| ------------------------------ | -------------------------------- | ------------------------------------------------ |
+| `SMTP_HOST`                    | — (obligatoria en el worker)     | Local: `localhost` (Mailpit)                     |
+| `SMTP_PORT`                    | 587                              | Local: 1025                                      |
+| `SMTP_USER` / `SMTP_PASS`      | —                                | Opcionales en local. **Secretos.**               |
+| `MAIL_FROM`                    | —                                | Por ejemplo `Crypto Tracker <alerts@tu-dominio>` |
+| `MAIL_DISPLAY_TIMEZONE`        | `America/Argentina/Buenos_Aires` | —                                                |
+| `MAIL_MAX_PER_MINUTE`          | 30                               | —                                                |
+| `ALERTS_MAX_ACTIVE`            | 20                               | —                                                |
+| `SEND_NOTIFICATIONS_CRON`      | `* * * * *`                      | —                                                |
+| `NOTIFY_BATCH_SIZE`            | 20                               | —                                                |
+| `NOTIFY_MAX_ATTEMPTS`          | 5                                | —                                                |
+| `NOTIFY_LOCK_TIMEOUT_MIN`      | 10                               | —                                                |
+| `NOTIFICATIONS_RETENTION_DAYS` | 90                               | —                                                |
 
 Servicio agregado a `docker-compose.yml`: `mailpit` (imagen `axllent/mailpit`), con SMTP en 1025 y UI en 8025.
 
@@ -365,6 +394,7 @@ Servicio agregado a `docker-compose.yml`: `mailpit` (imagen `axllent/mailpit`), 
 ## 12. Testing requerido
 
 **Unitarios**
+
 - `decide(alert, value, now)` con una tabla de casos: los 3 tipos × disparo, rearme, cooldown, `null` y bordes exactos (`==` umbral).
 - Cálculo de backoff con jitter acotado.
 - Clasificación de errores SMTP (transitorio o permanente) según `responseCode` y códigos de red.
@@ -372,6 +402,7 @@ Servicio agregado a `docker-compose.yml`: `mailpit` (imagen `axllent/mailpit`), 
 - Validación del body de alertas por tipo (rangos de `threshold`).
 
 **Integración** (`MongoMemoryReplSet` + `FakeMailer` + `FakeTokenVerifier`)
+
 - E5-1 a E5-17.
 - E5-7: modificar `version` desde el test entre `find` y `decide` (inyectar un hook en el repositorio) o llamar al paso de disparo con una alerta desactualizada.
 - E5-8: repositorio de notificaciones que lanza error en `insert`, para verificar el rollback.

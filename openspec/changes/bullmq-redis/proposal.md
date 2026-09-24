@@ -36,6 +36,7 @@ The design keeps the deployment path open — nothing in the code assumes a loca
 ## Capabilities
 
 ### New Capabilities
+
 - `redis-infrastructure`: the local Valkey service and its required configuration, `REDIS_URL`, and the startup `PING` plus eviction-policy check with its production-fatal, development-warning and cannot-verify behaviors.
 - `queue-topology`: the four queues, their job options (attempts, backoff, retention, deterministic ids) and worker options (concurrency, limiter), the centralized name constants, and the reasoning that separate queues stop one workload starving another.
 - `bullmq-schedulers`: idempotent upsert of the `poll-prices`, `maintenance` and `relay-notifications` schedulers, removal of schedulers no longer configured, and the five-field cron format note.
@@ -47,6 +48,7 @@ The design keeps the deployment path open — nothing in the code assumes a loca
 - `agenda-to-bullmq-migration`: the never-both-at-once rule, `npm run migrate:agenda-to-bullmq`, and the staged retirement of the `agenda_jobs` collection and the Agenda dependencies.
 
 ### Modified Capabilities
+
 - `price-polling-job`: the run no longer evaluates alerts inline; it enqueues one `evaluate-alerts` job per updated coin and degrades to `partial` with `error.code: ENQUEUE_FAILED` when enqueueing fails.
 - `alert-evaluation`: evaluation now runs per coin inside its own job rather than as a step of the polling run, and the notification is enqueued after the transaction commits.
 - `send-notifications-job`: **removed** — replaced by the per-notification `send-notification` job and the relay.

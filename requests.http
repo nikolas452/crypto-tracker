@@ -1,8 +1,13 @@
-### Crypto Tracker API — manual requests (Stage 0: base setup)
+### Crypto Tracker API — manual requests (Stage 0: base setup, Stage 2: api-rest)
 ### Use with the REST Client extension (VS Code) or any compatible .http runner.
 ### Run `npm run dev` first, then send requests against http://localhost:3000.
+### Stage 2 requires a seeded catalog (`npm run seed:coins`) and at least one
+### `poll-prices` run (`npm run job:poll-prices` or `npm run dev:worker`) for
+### non-empty responses; the admin requests additionally need `ADMIN_API_KEY`
+### set in `.env` — replace `<your-admin-api-key>` below with that value.
 
 @baseUrl = http://localhost:3000
+@adminApiKey = <your-admin-api-key>
 
 ### Liveness: never touches the database.
 GET {{baseUrl}}/health
@@ -22,3 +27,88 @@ POST {{baseUrl}}/health
 Content-Type: application/json
 
 {"invalid": json}
+
+### ============================================================
+### Stage 2 (api-rest): coin read endpoints
+### ============================================================
+
+### List coins: default page/limit, sorted by market cap descending.
+GET {{baseUrl}}/api/v1/coins
+
+### List coins with explicit pagination, sort and order.
+GET {{baseUrl}}/api/v1/coins?page=1&limit=10&sort=change24h&order=asc
+
+### List coins matching a name/symbol prefix (case-insensitive).
+GET {{baseUrl}}/api/v1/coins?q=bit
+
+### Unknown query param -> 400 VALIDATION_ERROR (E2-4).
+GET {{baseUrl}}/api/v1/coins?foo=1
+
+### Coin detail.
+GET {{baseUrl}}/api/v1/coins/bitcoin
+
+### Unknown coin -> 404 NOT_FOUND.
+GET {{baseUrl}}/api/v1/coins/no-existe
+
+### ============================================================
+### Stage 2 (api-rest): price history
+### ============================================================
+
+### Raw points over a short window (interval auto-selected as "raw").
+GET {{baseUrl}}/api/v1/coins/bitcoin/history?from=2026-09-22T00:00:00Z&to=2026-09-22T06:00:00Z
+
+### Explicit interval=raw.
+GET {{baseUrl}}/api/v1/coins/bitcoin/history?interval=raw&from=2026-09-22T00:00:00Z&to=2026-09-22T06:00:00Z
+
+### Bucketed OHLC candles (interval=1h) over 7 days, with a 3-bucket SMA.
+GET {{baseUrl}}/api/v1/coins/bitcoin/history?interval=1h&from=2026-09-16T00:00:00Z&to=2026-09-23T00:00:00Z&sma=3
+
+### Bucketed OHLC candles (interval=1d) over 90 days.
+GET {{baseUrl}}/api/v1/coins/bitcoin/history?interval=1d&from=2026-06-25T00:00:00Z&to=2026-09-23T00:00:00Z
+
+### raw over a range exceeding the 7-day cap -> 400 suggesting interval=1h (E2-8).
+GET {{baseUrl}}/api/v1/coins/bitcoin/history?interval=raw&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z
+
+### ============================================================
+### Stage 2 (api-rest): price stats
+### ============================================================
+
+### Default range (24h).
+GET {{baseUrl}}/api/v1/coins/bitcoin/stats
+
+### 7-day range.
+GET {{baseUrl}}/api/v1/coins/bitcoin/stats?range=7d
+
+### 90-day range (the range RNF-2.1 sets a p95 < 200ms budget for).
+GET {{baseUrl}}/api/v1/coins/bitcoin/stats?range=90d
+
+### ============================================================
+### Stage 2 (api-rest): status
+### ============================================================
+
+### Public worker-health summary — no admin key required.
+GET {{baseUrl}}/api/v1/status
+
+### ============================================================
+### Stage 2 (api-rest): admin job-runs (provisional X-Admin-Key)
+### ============================================================
+
+### Without X-Admin-Key -> 401 UNAUTHENTICATED (E2-13), or 404 NOT_FOUND if
+### ADMIN_API_KEY is unset in .env (E2-14).
+GET {{baseUrl}}/api/v1/admin/job-runs
+
+### Paginated list, filtered by status, with the admin key.
+GET {{baseUrl}}/api/v1/admin/job-runs?status=success,partial&limit=10
+X-Admin-Key: {{adminApiKey}}
+
+### Filtered by jobName and a startedAt range.
+GET {{baseUrl}}/api/v1/admin/job-runs?jobName=poll-prices&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z
+X-Admin-Key: {{adminApiKey}}
+
+### Job run detail by id (replace with a real _id from the list above).
+GET {{baseUrl}}/api/v1/admin/job-runs/651f1c2e8b1e2a0012a3b456
+X-Admin-Key: {{adminApiKey}}
+
+### Malformed id -> 400 VALIDATION_ERROR.
+GET {{baseUrl}}/api/v1/admin/job-runs/not-an-object-id
+X-Admin-Key: {{adminApiKey}}

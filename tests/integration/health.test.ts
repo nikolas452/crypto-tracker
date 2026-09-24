@@ -4,6 +4,8 @@ import request from 'supertest';
 import { createApp } from '../../src/app.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
 
+/** Tests de integración de los endpoints de salud (`GET /health`, `GET /health/ready`). */
+
 describe('health checks (integration)', () => {
   beforeAll(async () => {
     await startInMemoryMongo();
@@ -17,7 +19,7 @@ describe('health checks (integration)', () => {
     await stopInMemoryMongo();
   });
 
-  // E0-1: GET /health returns 200 with status ok, uptimeSeconds and X-Request-Id.
+  // E0-1: GET /health devuelve 200 con status ok, uptimeSeconds y X-Request-Id.
   it('E0-1: GET /health returns liveness status without checking dependencies', async () => {
     const app = createApp();
 
@@ -29,7 +31,7 @@ describe('health checks (integration)', () => {
     expect(response.headers['x-request-id']).toBeDefined();
   });
 
-  // E0-2: GET /health/ready returns 200 with checks.mongo: "up" when connected.
+  // E0-2: GET /health/ready devuelve 200 con checks.mongo: "up" cuando está conectado.
   it('E0-2: GET /health/ready returns ready when Mongo is connected', async () => {
     const app = createApp();
 
@@ -40,11 +42,11 @@ describe('health checks (integration)', () => {
     expect(response.body.checks.mongo).toBe('up');
   });
 
-  // E0-3: with Mongo disconnected, GET /health/ready returns 503 with status not_ready.
-  // Runs last among the Mongo-dependent checks: it disconnects Mongoose within the
-  // test on purpose and does not reconnect, per the scenario ("desconectar Mongoose
-  // dentro del test"). The remaining tests below only exercise /health (liveness),
-  // which never touches the database.
+  // E0-3: con Mongo desconectado, GET /health/ready devuelve 503 con status not_ready.
+  // Se ejecuta último entre los checks que dependen de Mongo: desconecta Mongoose
+  // dentro del test a propósito y no se reconecta, según el escenario ("desconectar
+  // Mongoose dentro del test"). Los tests restantes de abajo solo ejercitan /health
+  // (liveness), que nunca toca la base de datos.
   it('E0-3: GET /health/ready returns 503 when Mongo is disconnected', async () => {
     const app = createApp();
 
@@ -57,7 +59,7 @@ describe('health checks (integration)', () => {
     expect(response.body.checks.mongo).toBe('down');
   });
 
-  // E0-4: sending X-Request-Id echoes the same value back.
+  // E0-4: enviar X-Request-Id devuelve el mismo valor de vuelta.
   it('E0-4: echoes a client-supplied X-Request-Id back on the response', async () => {
     const app = createApp();
 

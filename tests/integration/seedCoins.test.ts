@@ -26,6 +26,8 @@ function fakeMarketsFor(ids: readonly string[]): MarketCoin[] {
   }));
 }
 
+/** Tests de integración del script `seed:coins` de `src/scripts/seedCoins.ts`. */
+
 describe('seed:coins (integration)', () => {
   beforeAll(async () => {
     await startInMemoryMongo();
@@ -43,7 +45,7 @@ describe('seed:coins (integration)', () => {
     expect(normalizeIds([' Bitcoin ', 'BITCOIN', 'ethereum', ''])).toEqual(['bitcoin', 'ethereum']);
   });
 
-  // E1-1: empty DB, default list is fully created, then re-run reports updates (idempotent).
+  // E1-1: DB vacía, la lista por defecto se crea entera, y una segunda corrida reporta updates (idempotente).
   it('E1-1: seeds the 10 default coins, then a second run reports updates without duplicates', async () => {
     const logger = createFakeLogger();
     const coinsRepo = createCoinsRepo();
@@ -64,15 +66,21 @@ describe('seed:coins (integration)', () => {
     expect(countAfterSecondRun).toBe(10);
   });
 
-  // E1-2: mixed valid/invalid id list.
+  // E1-2: lista de ids mixta, válidos e inválidos.
   it('E1-2: reports an id CoinGecko does not return as invalid, without inserting it', async () => {
     const logger = createFakeLogger();
     const coinsRepo = createCoinsRepo();
     const coingecko = {
-      getMarkets: vi.fn(async (ids: string[]) => fakeMarketsFor(ids.filter((id) => id !== 'no-existe-xyz'))),
+      getMarkets: vi.fn(async (ids: string[]) =>
+        fakeMarketsFor(ids.filter((id) => id !== 'no-existe-xyz')),
+      ),
     };
 
-    const summary = await runSeedCoins(['bitcoin', 'no-existe-xyz'], { coingecko, coinsRepo, logger });
+    const summary = await runSeedCoins(['bitcoin', 'no-existe-xyz'], {
+      coingecko,
+      coinsRepo,
+      logger,
+    });
 
     expect(summary.created).toEqual(['bitcoin']);
     expect(summary.invalid).toEqual(['no-existe-xyz']);

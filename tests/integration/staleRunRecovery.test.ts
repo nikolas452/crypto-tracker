@@ -3,6 +3,8 @@ import { createJobRunsRepo } from '../../src/modules/job-runs/job-runs.service.j
 import { JobRunModel } from '../../src/modules/job-runs/job-runs.model.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
 
+/** Tests de integración de `recoverStaleRuns` de `src/modules/job-runs/job-runs.service.ts`. */
+
 describe('stale-run recovery (integration)', () => {
   beforeAll(async () => {
     await startInMemoryMongo();
@@ -16,8 +18,8 @@ describe('stale-run recovery (integration)', () => {
     await stopInMemoryMongo();
   });
 
-  // E1-11: a JobRun stuck in "running" for 20 minutes is recovered as failed/STALE
-  // when the worker starts with the default 15-minute threshold.
+  // E1-11: un JobRun atascado en "running" durante 20 minutos se recupera como failed/STALE
+  // cuando el worker arranca con el umbral por defecto de 15 minutos.
   it('E1-11: marks a JobRun running for 20 minutes as failed/STALE', async () => {
     const now = new Date('2026-01-01T00:20:00.000Z');
     const twentyMinutesAgo = new Date(now.getTime() - 20 * 60_000);

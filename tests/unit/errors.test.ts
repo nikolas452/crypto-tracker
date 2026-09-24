@@ -16,6 +16,11 @@ import {
   validate,
 } from '../../src/lib/errors.js';
 
+/**
+ * Tests unitarios de la jerarquía `AppError` y del helper `validate()` de
+ * `src/lib/errors.ts`.
+ */
+
 describe('AppError hierarchy', () => {
   it.each([
     [ValidationError, 400, 'VALIDATION_ERROR'],

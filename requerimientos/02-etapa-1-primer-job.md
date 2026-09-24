@@ -17,19 +17,20 @@ Existe la API base con Mongo, config, errores y health checks. En esta etapa no 
 ## 3. Conceptos nuevos de la etapa
 
 - **Job:** unidad de trabajo que se ejecuta sin que la pida un request HTTP.
-- **Scheduler:** componente que decide *cuándo* se ejecuta un job. Acá es `node-cron`.
+- **Scheduler:** componente que decide _cuándo_ se ejecuta un job. Acá es `node-cron`.
 - **Expresión cron:** cadena de 5 campos (minuto, hora, día del mes, mes, día de la semana) que describe cuándo ejecutar algo. `*/10 * * * *` significa "cada 10 minutos".
 - **Worker:** proceso que ejecuta jobs. Se separa de la API para que un problema en uno no tumbe al otro y para poder escalarlos por separado.
-- **Serie temporal / colección time-series:** datos que son "valor en un momento", como un precio a las 21:30. MongoDB 5+ tiene un tipo especial de colección para esto: agrupa internamente los puntos en *buckets* por rango de tiempo y por el campo `metaField`, y los comprime. Ocupa mucho menos espacio y las consultas por rango de fechas son más rápidas. A cambio, tiene restricciones (por ejemplo, no admite índices únicos) y conviene tratar sus documentos como inmutables.
+- **Serie temporal / colección time-series:** datos que son "valor en un momento", como un precio a las 21:30. MongoDB 5+ tiene un tipo especial de colección para esto: agrupa internamente los puntos en _buckets_ por rango de tiempo y por el campo `metaField`, y los comprime. Ocupa mucho menos espacio y las consultas por rango de fechas son más rápidas. A cambio, tiene restricciones (por ejemplo, no admite índices únicos) y conviene tratar sus documentos como inmutables.
 - **Rate limit y cuota:** límites que impone el proveedor externo. CoinGecko Demo permite 100 llamadas por minuto y 10.000 por mes.
 - **Batching:** pedir varias monedas en una sola llamada en vez de una llamada por moneda.
-- **Retry con backoff exponencial y jitter:** reintentar una llamada fallida esperando cada vez más (1 s, 3 s...) y con un pequeño componente aleatorio (*jitter*), para no golpear al proveedor justo cuando está con problemas.
+- **Retry con backoff exponencial y jitter:** reintentar una llamada fallida esperando cada vez más (1 s, 3 s...) y con un pequeño componente aleatorio (_jitter_), para no golpear al proveedor justo cuando está con problemas.
 - **Overlap:** una ejecución del job empieza cuando la anterior todavía no terminó.
 - **Idempotencia (primer contacto):** poder ejecutar algo dos veces sin generar duplicados. Se aplica en el seed y en no guardar el mismo punto de precio dos veces.
 
 ## 4. Alcance
 
 **Incluye**
+
 - Modelos `Coin`, `PriceSnapshot` (time-series) y `JobRun`.
 - Cliente HTTP de CoinGecko con validación de respuestas, timeouts, reintentos y mapeo de errores.
 - Script de seed de monedas.
@@ -38,6 +39,7 @@ Existe la API base con Mongo, config, errores y health checks. En esta etapa no 
 - Script de ejecución manual del job.
 
 **No incluye**
+
 - Endpoints para leer los datos (etapa 2).
 - Alertas (etapa 5).
 - Scheduler persistido (etapa 6).
@@ -57,35 +59,36 @@ Existe la API base con Mongo, config, errores y health checks. En esta etapa no 
 
 ### 6.1 `coins` (colección normal)
 
-| Campo | Tipo | Reglas |
-| --- | --- | --- |
-| `_id` | ObjectId | — |
-| `coingeckoId` | string | Obligatorio, único, minúsculas, `^[a-z0-9-]+$` |
-| `symbol` | string | Obligatorio, se guarda en minúsculas |
-| `name` | string | Obligatorio |
-| `isActive` | boolean | Default `true`. El job solo consulta las activas. |
-| `createdAt` / `updatedAt` | Date | `timestamps: true` |
+| Campo                     | Tipo     | Reglas                                            |
+| ------------------------- | -------- | ------------------------------------------------- |
+| `_id`                     | ObjectId | —                                                 |
+| `coingeckoId`             | string   | Obligatorio, único, minúsculas, `^[a-z0-9-]+$`    |
+| `symbol`                  | string   | Obligatorio, se guarda en minúsculas              |
+| `name`                    | string   | Obligatorio                                       |
+| `isActive`                | boolean  | Default `true`. El job solo consulta las activas. |
+| `createdAt` / `updatedAt` | Date     | `timestamps: true`                                |
 
 Índices: `{ coingeckoId: 1 }` único y `{ isActive: 1 }`.
 
 ### 6.2 `price_snapshots` (colección time-series)
 
 Opciones de la colección:
+
 - `timeField: "timestamp"`
 - `metaField: "meta"`
 - `granularity: "minutes"`
 - `expireAfterSeconds`: `SNAPSHOT_RETENTION_DAYS × 86400`. Si la variable no está definida, no hay expiración.
 
-| Campo | Tipo | Reglas |
-| --- | --- | --- |
-| `timestamp` | Date | Obligatorio. Momento de captura. |
-| `meta.coinId` | ObjectId | Obligatorio. Referencia a `coins._id`. |
-| `meta.coingeckoId` | string | Obligatorio. Se duplica acá para poder consultar sin cruzar colecciones. |
-| `priceUsd` | number | Obligatorio, > 0 |
-| `marketCapUsd` | number \| null | — |
-| `volume24hUsd` | number \| null | — |
-| `change24hPct` | number \| null | — |
-| `sourceUpdatedAt` | Date \| null | Viene de `last_updated_at` (epoch en segundos → Date) |
+| Campo              | Tipo           | Reglas                                                                   |
+| ------------------ | -------------- | ------------------------------------------------------------------------ |
+| `timestamp`        | Date           | Obligatorio. Momento de captura.                                         |
+| `meta.coinId`      | ObjectId       | Obligatorio. Referencia a `coins._id`.                                   |
+| `meta.coingeckoId` | string         | Obligatorio. Se duplica acá para poder consultar sin cruzar colecciones. |
+| `priceUsd`         | number         | Obligatorio, > 0                                                         |
+| `marketCapUsd`     | number \| null | —                                                                        |
+| `volume24hUsd`     | number \| null | —                                                                        |
+| `change24hPct`     | number \| null | —                                                                        |
+| `sourceUpdatedAt`  | Date \| null   | Viene de `last_updated_at` (epoch en segundos → Date)                    |
 
 Índice secundario: `{ "meta.coingeckoId": 1, timestamp: -1 }`.
 
@@ -93,31 +96,33 @@ Opciones de la colección:
 
 ### 6.3 `job_runs` (colección normal)
 
-| Campo | Tipo | Reglas |
-| --- | --- | --- |
-| `_id` | ObjectId | Se usa como `runId` en los logs |
-| `jobName` | string | Por ahora solo `poll-prices` |
-| `trigger` | enum `schedule` \| `manual` \| `startup` | — |
-| `status` | enum `running` \| `success` \| `partial` \| `failed` \| `skipped` | — |
-| `skipReason` | enum `overlap` \| `no_active_coins` \| null | — |
-| `startedAt` | Date | Obligatorio |
-| `finishedAt` | Date \| null | — |
-| `durationMs` | number \| null | — |
-| `stats.coinsRequested` | number | — |
-| `stats.coinsReturned` | number | — |
-| `stats.snapshotsInserted` | number | — |
-| `stats.skippedUnchanged` | number | — |
-| `stats.missingCoins` | string[] | IDs que CoinGecko no devolvió |
-| `stats.upstreamAttempts` | number | Intentos HTTP totales, contando reintentos |
-| `error` | `{ code, message }` \| null | Nunca un stack completo ni secretos |
-| `workerId` | string | `hostname-pid`. Sirve para saber qué proceso lo ejecutó. |
+| Campo                     | Tipo                                                              | Reglas                                                   |
+| ------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------- |
+| `_id`                     | ObjectId                                                          | Se usa como `runId` en los logs                          |
+| `jobName`                 | string                                                            | Por ahora solo `poll-prices`                             |
+| `trigger`                 | enum `schedule` \| `manual` \| `startup`                          | —                                                        |
+| `status`                  | enum `running` \| `success` \| `partial` \| `failed` \| `skipped` | —                                                        |
+| `skipReason`              | enum `overlap` \| `no_active_coins` \| null                       | —                                                        |
+| `startedAt`               | Date                                                              | Obligatorio                                              |
+| `finishedAt`              | Date \| null                                                      | —                                                        |
+| `durationMs`              | number \| null                                                    | —                                                        |
+| `stats.coinsRequested`    | number                                                            | —                                                        |
+| `stats.coinsReturned`     | number                                                            | —                                                        |
+| `stats.snapshotsInserted` | number                                                            | —                                                        |
+| `stats.skippedUnchanged`  | number                                                            | —                                                        |
+| `stats.missingCoins`      | string[]                                                          | IDs que CoinGecko no devolvió                            |
+| `stats.upstreamAttempts`  | number                                                            | Intentos HTTP totales, contando reintentos               |
+| `error`                   | `{ code, message }` \| null                                       | Nunca un stack completo ni secretos                      |
+| `workerId`                | string                                                            | `hostname-pid`. Sirve para saber qué proceso lo ejecutó. |
 
 Índices:
+
 - `{ jobName: 1, startedAt: -1 }`
 - `{ status: 1, startedAt: 1 }`
 - TTL sobre `startedAt` con `JOB_RUNS_RETENTION_DAYS` (default 30). Mongo borra solo los documentos vencidos; un proceso interno de la base revisa aproximadamente cada 60 s.
 
 **Estados:**
+
 - `success`: todas las monedas pedidas llegaron y se procesaron.
 - `partial`: la llamada funcionó pero faltaron monedas en la respuesta.
 - `failed`: error de upstream o de base.
@@ -126,6 +131,7 @@ Opciones de la colección:
 ## 7. Requerimientos funcionales
 
 ### RF-1.1 Creación de colecciones al arrancar
+
 - Al iniciar (API, worker y scripts), `ensureCollections()`:
   - Si `price_snapshots` no existe, la crea con las opciones time-series de 6.2 (con `Model.createCollection()` o `db.createCollection`).
   - Si ya existe, verifica con `listCollections` que sea time-series con el mismo `timeField` y `metaField`. Si no lo es, loguea en `fatal` y sale con código 1, con un mensaje que indique cómo corregirlo.
@@ -133,6 +139,7 @@ Opciones de la colección:
 - Motivo: si el primer `insert` crea la colección automáticamente, se crea como colección **normal** y ya no se puede convertir a time-series.
 
 ### RF-1.2 Cliente de CoinGecko
+
 Módulo `src/integrations/coingecko/` con la interfaz:
 
 ```ts
@@ -141,23 +148,30 @@ interface CoinGeckoClient {
   getMarkets(ids: string[]): Promise<MarketCoin[]>;
   ping(): Promise<void>;
 }
-type SimplePrice = { priceUsd: number; marketCapUsd: number | null; volume24hUsd: number | null; change24hPct: number | null; sourceUpdatedAt: Date | null };
+type SimplePrice = {
+  priceUsd: number;
+  marketCapUsd: number | null;
+  volume24hUsd: number | null;
+  change24hPct: number | null;
+  sourceUpdatedAt: Date | null;
+};
 type MarketCoin = { coingeckoId: string; symbol: string; name: string; priceUsd: number };
 ```
 
 Reglas:
+
 1. **Batching:** los `ids` se dividen en lotes de hasta `COINGECKO_MAX_IDS_PER_CALL` (default 50) y los lotes se piden en secuencia, nunca en paralelo.
 2. **Timeout:** `COINGECKO_TIMEOUT_MS` por intento (default 10000).
 3. **Validación de la respuesta** con Zod. Un campo que falta o es `null` se mapea a `null`, salvo `usd`: si falta o no es número positivo, se descarta esa moneda y se loguea en `warn`. Si la respuesta entera no tiene la forma esperada, se lanza `UpstreamError` con código interno `COINGECKO_BAD_RESPONSE`.
 4. **Mapeo de errores:**
 
-| Situación | Error lanzado | ¿Reintenta? |
-| --- | --- | --- |
-| Timeout o error de red | `UpstreamError` (`COINGECKO_UNAVAILABLE`) | Sí |
-| 5xx | `UpstreamError` (`COINGECKO_UNAVAILABLE`) | Sí |
-| 429 | `UpstreamError` (`COINGECKO_RATE_LIMITED`) | Sí, una vez, esperando `Retry-After` si viene y es ≤ 60 s; si no, 30 s |
-| 401 / 403 | `UpstreamError` (`COINGECKO_AUTH`), logueado en `error` | No |
-| Otro 4xx | `UpstreamError` (`COINGECKO_CLIENT_ERROR`) | No |
+| Situación              | Error lanzado                                           | ¿Reintenta?                                                            |
+| ---------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Timeout o error de red | `UpstreamError` (`COINGECKO_UNAVAILABLE`)               | Sí                                                                     |
+| 5xx                    | `UpstreamError` (`COINGECKO_UNAVAILABLE`)               | Sí                                                                     |
+| 429                    | `UpstreamError` (`COINGECKO_RATE_LIMITED`)              | Sí, una vez, esperando `Retry-After` si viene y es ≤ 60 s; si no, 30 s |
+| 401 / 403              | `UpstreamError` (`COINGECKO_AUTH`), logueado en `error` | No                                                                     |
+| Otro 4xx               | `UpstreamError` (`COINGECKO_CLIENT_ERROR`)              | No                                                                     |
 
 5. **Reintentos:** máximo `COINGECKO_MAX_RETRIES` (default 2). Esperas de 1 s y 3 s, cada una con jitter aleatorio de ±20 %. La función de espera se inyecta para poder testear sin esperar de verdad.
 6. **Contador de intentos:** `attempts` cuenta todas las llamadas HTTP hechas, reintentos incluidos, para registrar el consumo de cuota.
@@ -165,6 +179,7 @@ Reglas:
 8. La API key **nunca** aparece en logs ni en mensajes de error.
 
 ### RF-1.3 Seed de monedas (`npm run seed:coins`)
+
 - Entrada:
   - Lista por argumento: `npm run seed:coins -- bitcoin,ethereum`.
   - Si no hay argumento, usa la lista por defecto: `bitcoin, ethereum, solana, cardano, ripple, dogecoin, polkadot, chainlink, litecoin, avalanche-2`.
@@ -178,11 +193,13 @@ Reglas:
 - Código de salida: 0 si hubo al menos una moneda válida, 1 si ninguna lo fue o si hubo un error.
 
 ### RF-1.4 Job `poll-prices`
+
 Implementado como `createPollPricesJob(deps)`, que devuelve `run(trigger): Promise<JobRunResult>`.
 
 Dependencias: `coinsRepo`, `snapshotsRepo`, `jobRunsRepo`, `coingecko`, `clock`, `logger` y `workerId`.
 
 Pasos:
+
 1. Crea un `JobRun` con `status: running` y `startedAt: clock.now()`.
 2. Carga las monedas con `isActive: true`. Si no hay, cierra el run como `skipped` (`no_active_coins`) y termina.
 3. Llama a `getSimplePrices` con sus `coingeckoId`.
@@ -197,6 +214,7 @@ Pasos:
 9. Loguea en `info` el inicio y el fin, con `runId`, `trigger`, `status`, `durationMs` y `stats`.
 
 ### RF-1.5 Protección contra overlap
+
 - El worker mantiene un flag en memoria `isRunning` por job.
 - Si llega un tick mientras `isRunning === true`:
   - No ejecuta el job.
@@ -205,7 +223,9 @@ Pasos:
 - El flag se libera en un `finally`, así que se libera aunque el job falle.
 
 ### RF-1.6 Entrypoint `src/worker.ts`
+
 Al arrancar:
+
 1. Valida la config (misma función que la API, más las variables de esta etapa).
 2. Conecta a Mongo (RF-0.3) y ejecuta `ensureCollections()`.
 3. **Recuperación de runs colgados:** marca como `failed` (con `error.code: STALE`) todos los `JobRun` con `status: running` y `startedAt` anterior a `now - STALE_RUN_THRESHOLD_MIN` (default 15). Esto cubre el caso de un worker que murió a mitad de una ejecución.
@@ -217,18 +237,22 @@ Al arrancar:
 El worker **no** levanta servidor HTTP.
 
 ### RF-1.7 Apagado ordenado del worker
+
 Ante `SIGTERM` o `SIGINT`:
+
 1. Detiene las tareas de node-cron (`task.stop()`), así que no arrancan ejecuciones nuevas.
 2. Si hay un job corriendo, espera hasta `WORKER_SHUTDOWN_TIMEOUT_MS` (default 30000) a que termine.
 3. Cierra la conexión a Mongo y sale con código 0.
 4. Si se agota el timeout, sale con código 1 sin tocar el run. La recuperación de RF-1.6 lo marcará como `STALE` en el próximo arranque.
 
 ### RF-1.8 Ejecución manual (`npm run job:poll-prices`)
+
 - Conecta, ejecuta `ensureCollections()`, ejecuta el job **una vez** con `trigger: manual`, imprime el resultado y sale.
 - Código de salida: 0 si el estado es `success`, `partial` o `skipped`; 1 si es `failed`.
 - No respeta el flag de overlap del worker, porque es otro proceso. Se documenta como limitación: si coincide con una ejecución del worker puede haber dos corridas simultáneas. La deduplicación de RF-1.4 evita puntos repetidos, y la etapa 6 resuelve el problema de fondo con locks.
 
 ### RF-1.9 Scripts npm nuevos
+
 `dev:worker`, `start:worker`, `seed:coins` y `job:poll-prices`.
 
 ## 8. Requerimientos no funcionales
@@ -241,19 +265,19 @@ Ante `SIGTERM` o `SIGINT`:
 
 ## 9. Variables de entorno nuevas
 
-| Variable | Obligatoria | Default | Uso |
-| --- | --- | --- | --- |
-| `COINGECKO_API_KEY` | Sí | — | Key del plan Demo |
-| `COINGECKO_BASE_URL` | No | `https://api.coingecko.com/api/v3` | — |
-| `COINGECKO_TIMEOUT_MS` | No | `10000` | — |
-| `COINGECKO_MAX_RETRIES` | No | `2` | 0–5 |
-| `COINGECKO_MAX_IDS_PER_CALL` | No | `50` | 1–250 |
-| `POLL_PRICES_CRON` | No | `*/10 * * * *` | Validada con `cron.validate` |
-| `POLL_PRICES_RUN_ON_START` | No | `true` | — |
-| `SNAPSHOT_RETENTION_DAYS` | No | `90` | Vacío = sin expiración |
-| `JOB_RUNS_RETENTION_DAYS` | No | `30` | — |
-| `STALE_RUN_THRESHOLD_MIN` | No | `15` | — |
-| `WORKER_SHUTDOWN_TIMEOUT_MS` | No | `30000` | — |
+| Variable                     | Obligatoria | Default                            | Uso                          |
+| ---------------------------- | ----------- | ---------------------------------- | ---------------------------- |
+| `COINGECKO_API_KEY`          | Sí          | —                                  | Key del plan Demo            |
+| `COINGECKO_BASE_URL`         | No          | `https://api.coingecko.com/api/v3` | —                            |
+| `COINGECKO_TIMEOUT_MS`       | No          | `10000`                            | —                            |
+| `COINGECKO_MAX_RETRIES`      | No          | `2`                                | 0–5                          |
+| `COINGECKO_MAX_IDS_PER_CALL` | No          | `50`                               | 1–250                        |
+| `POLL_PRICES_CRON`           | No          | `*/10 * * * *`                     | Validada con `cron.validate` |
+| `POLL_PRICES_RUN_ON_START`   | No          | `true`                             | —                            |
+| `SNAPSHOT_RETENTION_DAYS`    | No          | `90`                               | Vacío = sin expiración       |
+| `JOB_RUNS_RETENTION_DAYS`    | No          | `30`                               | —                            |
+| `STALE_RUN_THRESHOLD_MIN`    | No          | `15`                               | —                            |
+| `WORKER_SHUTDOWN_TIMEOUT_MS` | No          | `30000`                            | —                            |
 
 `COINGECKO_API_KEY` es obligatoria solo para el worker y los scripts. La API no la necesita hasta la etapa 4, así que conviene tener un esquema de config por proceso o marcarla como obligatoria solo en esos entrypoints.
 
@@ -286,6 +310,7 @@ Ante `SIGTERM` o `SIGINT`:
 ## 12. Testing requerido
 
 **Unitarios**
+
 - Cliente CoinGecko con `fetch` falso (`vi.stubGlobal('fetch', ...)`) y función de espera falsa:
   - Mapeo correcto de campos, incluidos `null` y epoch → Date.
   - Descarte de `usd` inválido.
@@ -300,6 +325,7 @@ Ante `SIGTERM` o `SIGINT`:
 - Cálculo de estado (`success` / `partial` / `failed`) como función pura.
 
 **Integración** (mongodb-memory-server)
+
 - E1-3 y E1-4, verificados con `listCollections`.
 - Seed idempotente (E1-1) con un cliente CoinGecko falso.
 - Deduplicación con datos reales en la colección time-series (E1-6).
@@ -307,6 +333,7 @@ Ante `SIGTERM` o `SIGINT`:
 - TTL: el índice existe con el `expireAfterSeconds` esperado. No se espera a que Mongo borre documentos.
 
 **Manual**
+
 - Correr el worker con la key real durante 30 minutos y verificar en Compass los snapshots y los `job_runs`.
 
 ## 13. Preguntas abiertas

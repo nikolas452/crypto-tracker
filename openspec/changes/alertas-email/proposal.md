@@ -33,6 +33,7 @@ Relatedly, because the worker only runs during testing sessions rather than cont
 ## Capabilities
 
 ### New Capabilities
+
 - `transactional-mongo`: the replica-set requirement — the local `docker-compose` topology, `MongoMemoryReplSet` in tests, the startup verification that the connection supports transactions, and the fail-fast exit when it does not.
 - `alert-store`: the `alerts` collection, its indexes, the `ALERTS_MAX_ACTIVE` cap, the state machine and its permitted transitions, the trigger and rearm conditions per alert type, the cooldown rule, and the pure `decide(alert, value, now)` contract.
 - `alert-api`: the five `/api/v1/me/alerts` endpoints — the type-dependent threshold validation, the fixed validation order (400, 422 `EMAIL_NOT_VERIFIED`, 404, 422 `LIMIT_REACHED`), the `meta.conditionCurrentlyMet` hint, the immutability of `type`, the `version` increment on every modification, the 404-not-403 rule for another user's alert, and the cancellation of pending notifications on delete.
@@ -44,6 +45,7 @@ Relatedly, because the worker only runs during testing sessions rather than cont
 - `admin-notifications-api`: `GET /api/v1/admin/notifications` with full `lastError` and `lockedBy`, `POST /api/v1/admin/notifications/:id/retry` (409 unless `failed`), and `POST /api/v1/admin/notifications/test-email` sending immediately outside the outbox.
 
 ### Modified Capabilities
+
 - `price-polling-job`: the run gains a final alert-evaluation step over the coins updated in this run, degrades to `partial` with `error.code: ALERT_EVALUATION_FAILED` when that step fails without affecting stored prices, and triggers `send-notifications` immediately when at least one alert fired.
 - `job-run-tracking`: `jobName` now also takes `send-notifications`, and `stats` gains the alert-evaluation counters (`alertsEvaluated`, `alertsTriggered`, `alertsRearmed`, `alertsInCooldown`, `triggerConflicts`) and the send counters (`claimed`, `sent`, `retried`, `failedPermanent`, `failedExhausted`, `cancelled`, `recoveredStale`).
 - `worker-process`: startup now also verifies replica-set support and calls `mailer.verify()` without aborting on failure, and the worker schedules `send-notifications` alongside `poll-prices`, each with its own overlap guard and its own `JobRun`.
