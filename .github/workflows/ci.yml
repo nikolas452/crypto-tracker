@@ -66,6 +66,13 @@ jobs:
         with:
           node-version: '24'
           cache: 'npm'
+      # Cachea el binario de MongoDB que descarga mongodb-memory-server: evita
+      # volver a bajarlo en cada run y reduce la ventana para la carrera de
+      # descarga concurrente que resuelve tests/globalSetup.ts.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-8.0.11
       - run: npm ci
       - run: npm test
 
