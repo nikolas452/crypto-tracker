@@ -7,14 +7,18 @@ import { createRequestLogger } from './middlewares/requestLogger.js';
 import { createErrorHandler } from './middlewares/errorHandler.js';
 import { notFoundHandler } from './middlewares/notFoundHandler.js';
 import { createRateLimiter } from './middlewares/rateLimiter.js';
-import { createRequireAdminKey } from './middlewares/requireAdminKey.js';
+import { createUserRateLimiter } from './middlewares/userRateLimiter.js';
+import { requireAuth } from './middlewares/requireAuth.js';
+import { requireRole } from './middlewares/requireRole.js';
 import { cacheControlNoStore, cacheControlPublic } from './middlewares/cacheControl.js';
 import { createHealthRouter } from './routes/health.routes.js';
 import { createCoinsRouter } from './modules/coins/coins.routes.js';
 import { createStatusRouter } from './modules/status/status.routes.js';
 import { createJobRunsRouter } from './modules/job-runs/job-runs.routes.js';
+import { createUsersRouter } from './modules/users/users.routes.js';
 import { createMongoReadinessCheck, type ReadinessCheck } from './lib/health.js';
 import { logger as defaultLogger } from './lib/logger.js';
+import { createLazyFirebaseTokenVerifier, type TokenVerifier } from './integrations/firebase/tokenVerifier.js';
 
 export interface CreateAppDeps {
   /** Por defecto, la instancia compartida de pino de `src/lib/logger.ts`. */
@@ -37,15 +41,24 @@ export interface CreateAppDeps {
    */
   readonly rateLimitConfig?: Pick<Config, 'RATE_LIMIT_MAX' | 'RATE_LIMIT_WINDOW_MIN'>;
   /**
-   * Override exclusivo para tests de `ADMIN_API_KEY`. Por defecto, el
-   * `config` real (normalmente sin definir en el entorno de test —
-   * `vitest.config.ts` no la define y `npm test` nunca carga `.env`).
-   * Permite que los tests de integración ejerciten tanto la rama
-   * configurada (E2-13) como la no configurada (E2-14) sin mutar
-   * `process.env` para un singleton a nivel de módulo que ya fue parseado —
-   * la misma razón que `rateLimitConfig`.
+   * Override exclusivo para tests del presupuesto del limitador de tasa por
+   * uid (`USER_RATE_LIMIT_PER_MIN`, spec user-rate-limiting). Por defecto, el
+   * `config` real. Mismo motivo que `rateLimitConfig`: permite ejercitar un
+   * límite ajustado (E3-12) sin mutar `process.env` para un singleton a nivel
+   * de módulo que ya fue parseado.
    */
-  readonly adminApiKey?: string;
+  readonly userRateLimitConfig?: Pick<Config, 'USER_RATE_LIMIT_PER_MIN'>;
+  /**
+   * Verificador de tokens de ID de Firebase (spec token-verification). Por
+   * defecto, una implementación perezosa respaldada por Firebase Admin real
+   * (`createLazyFirebaseTokenVerifier()`), que no toca `firebase-admin` hasta
+   * que de verdad se verifica un token. Los tests inyectan
+   * `createFakeTokenVerifier(...)` acá para ejercitar rutas autenticadas
+   * (`requireAuth`, Fase B) sin ningún proyecto de Firebase real ni acceso a
+   * red — el mismo patrón de inyección por factory que
+   * `logger`/`rateLimitConfig`/`userRateLimitConfig`.
+   */
+  readonly tokenVerifier?: TokenVerifier;
 }
 
 /**
@@ -61,15 +74,28 @@ export interface CreateAppDeps {
  * global (montado solo en `/api`, así `/health` y `/health/ready` quedan
  * exentas) -> rutas de la aplicación bajo `/api/v1` (las rutas de lectura de
  * monedas y la ruta de status, cada una precedida por su middleware
- * `Cache-Control`, las rutas de admin precedidas por `Cache-Control:
- * no-store` y protegidas por `requireAdminKey`, más rutas a seguir en
- * etapas posteriores) -> manejador 404 -> manejador de errores centralizado.
+ * `Cache-Control`; `/me`, cada uno de cuyos verbos llama a `requireAuth` con
+ * sus propias opciones y encadena el limitador de tasa por uid compartido;
+ * las rutas de admin precedidas por `Cache-Control: no-store` y protegidas
+ * por `requireAuth({ checkRevoked: true })` + el mismo limitador por uid +
+ * `requireRole('admin')`) -> manejador 404 -> manejador de errores
+ * centralizado.
  */
 export function createApp(deps: CreateAppDeps = {}): Express {
   const logger = deps.logger ?? defaultLogger;
   const readinessChecks = deps.readinessChecks ?? [createMongoReadinessCheck()];
+  const tokenVerifier = deps.tokenVerifier ?? createLazyFirebaseTokenVerifier();
+  // Instancia única compartida entre `/me` y `/admin` (spec
+  // user-rate-limiting: "un solo presupuesto por usuario", no uno
+  // independiente por ruta) — ver `userRateLimiter.ts`.
+  const userRateLimiter = createUserRateLimiter(deps.userRateLimitConfig ?? config);
 
   const app = express();
+
+  // Expuesto a nivel de app (no solo como variable local) para que la Fase B
+  // pueda leerlo desde `req.app.locals.tokenVerifier` en `requireAuth` sin
+  // que este factory tenga que volver a resolver la dependencia.
+  app.locals.tokenVerifier = tokenVerifier;
 
   // TRUST_PROXY: 0 en desarrollo, 1 en producción (default de config) — hace
   // que la clave basada en IP del limitador de tasa resuelva al cliente de
@@ -90,19 +116,27 @@ export function createApp(deps: CreateAppDeps = {}): Express {
 
   app.use('/api', createRateLimiter(deps.rateLimitConfig ?? config));
 
-  // Cache-Control se monta junto a cada router (spec http-caching), antes
-  // de requireAdminKey en /api/v1/admin para que incluso su 404 por clave
-  // no configurada lleve no-store, no solo las rutas de admin conocidas
-  // detrás de él.
+  // Cache-Control se monta junto a cada router (spec http-caching).
   app.use('/api/v1/coins', cacheControlPublic(60), createCoinsRouter());
   app.use('/api/v1/status', cacheControlNoStore, createStatusRouter());
 
-  // requireAdminKey se monta sobre el propio prefijo `/api/v1/admin` (no
-  // solo sobre el router de job-runs) para que también rija cualquier
-  // futura ruta de admin, y para que una ADMIN_API_KEY sin configurar
-  // devuelva 404 en cada path bajo ese prefijo, no solo en los conocidos
-  // (spec admin-api-key).
-  app.use('/api/v1/admin', cacheControlNoStore, createRequireAdminKey(deps.adminApiKey));
+  // `/me`: sin Cache-Control propio (spec me-endpoints no lo pide); cada
+  // verbo llama a requireAuth con sus propias opciones dentro del router
+  // (ver users.routes.ts).
+  app.use('/api/v1/me', createUsersRouter(userRateLimiter));
+
+  // requireAuth + requireRole reemplazan al retirado requireAdminKey (spec
+  // role-authorization, auth-firebase tarea 6.2/6.3): se montan sobre el
+  // propio prefijo `/api/v1/admin` (no solo sobre el router de job-runs) para
+  // que también rijan cualquier futura ruta de admin. checkRevoked: true
+  // porque toda la superficie de admin es privilegiada (design.md).
+  app.use(
+    '/api/v1/admin',
+    cacheControlNoStore,
+    requireAuth({ checkRevoked: true }),
+    userRateLimiter,
+    requireRole('admin'),
+  );
   app.use('/api/v1/admin/job-runs', createJobRunsRouter());
 
   if (deps.registerTestRoutes) {

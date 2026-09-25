@@ -3,11 +3,51 @@ import request from 'supertest';
 import pino from 'pino';
 import { createApp } from '../../src/app.js';
 import { JobRunModel } from '../../src/modules/job-runs/job-runs.model.js';
+import { UserModel } from '../../src/modules/users/users.model.js';
+import { createFakeTokenVerifier } from '../../src/integrations/firebase/fakeTokenVerifier.js';
 import { ensureCollections } from '../../src/db/ensureCollections.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
 
 const silentLogger = pino({ level: 'silent' });
-const ADMIN_KEY = 'a'.repeat(32);
+
+const ADMIN_TOKEN = 'admin-token';
+const USER_TOKEN = 'user-token';
+const ADMIN_IDENTITY = {
+  uid: 'admin-uid',
+  email: 'admin@example.com',
+  emailVerified: true,
+  name: null,
+};
+const USER_IDENTITY = {
+  uid: 'plain-user-uid',
+  email: 'plain-user@example.com',
+  emailVerified: true,
+  name: null,
+};
+
+/** `createApp` con un `FakeTokenVerifier` que conoce a un admin y a un usuario `user` (specs role-authorization / auth-middleware). */
+function createAppWithFakeAuth() {
+  return createApp({
+    tokenVerifier: createFakeTokenVerifier({
+      identities: {
+        [ADMIN_TOKEN]: ADMIN_IDENTITY,
+        [USER_TOKEN]: USER_IDENTITY,
+      },
+    }),
+  });
+}
+
+/** Pre-aprovisiona el perfil de Mongo del admin con `role: 'admin'` antes del primer request autenticado. */
+async function seedAdminUser() {
+  await UserModel.create({
+    firebaseUid: ADMIN_IDENTITY.uid,
+    email: ADMIN_IDENTITY.email,
+    emailVerified: ADMIN_IDENTITY.emailVerified,
+    displayName: null,
+    role: 'admin',
+    lastSeenAt: new Date(),
+  });
+}
 
 const EMPTY_STATS = {
   coinsRequested: 0,
@@ -37,8 +77,12 @@ async function createJobRun(overrides: {
   });
 }
 
-/** Tests de integración de los endpoints admin de job-runs (`/api/v1/admin/job-runs`). */
-
+/**
+ * Tests de integración de los endpoints admin de job-runs (`/api/v1/admin/job-runs`),
+ * protegidos por `requireAuth({ checkRevoked: true })` + `requireRole('admin')`
+ * (spec role-authorization) desde que se retiró `requireAdminKey` (auth-firebase,
+ * tarea 6.2/6.3).
+ */
 describe('admin job-runs API (integration)', () => {
   beforeAll(async () => {
     await startInMemoryMongo();
@@ -53,36 +97,17 @@ describe('admin job-runs API (integration)', () => {
     await stopInMemoryMongo();
   });
 
-  describe('when ADMIN_API_KEY is configured', () => {
-    // E2-13 (parte 1): sin header -> 401 UNAUTHENTICATED.
-    it('E2-13: rejects a request without X-Admin-Key with 401 UNAUTHENTICATED', async () => {
-      const app = createApp({ adminApiKey: ADMIN_KEY });
-      const response = await request(app).get('/api/v1/admin/job-runs');
-
-      expect(response.status).toBe(401);
-      expect(response.body.error.code).toBe('UNAUTHENTICATED');
-    });
-
-    it('rejects a request with a wrong X-Admin-Key with 401 UNAUTHENTICATED', async () => {
-      const app = createApp({ adminApiKey: ADMIN_KEY });
-      const response = await request(app)
-        .get('/api/v1/admin/job-runs')
-        .set('X-Admin-Key', 'b'.repeat(32));
-
-      expect(response.status).toBe(401);
-      expect(response.body.error.code).toBe('UNAUTHENTICATED');
-    });
-
-    // E2-13 (parte 2): clave correcta -> lista paginada.
-    it('E2-13: returns the paginated list with the correct X-Admin-Key', async () => {
+  describe('as an authenticated admin', () => {
+    it('returns the paginated list', async () => {
+      await seedAdminUser();
       const now = new Date();
       await createJobRun({ startedAt: new Date(now.getTime() - 1000) });
       await createJobRun({ startedAt: now });
 
-      const app = createApp({ adminApiKey: ADMIN_KEY });
+      const app = createAppWithFakeAuth();
       const response = await request(app)
         .get('/api/v1/admin/job-runs')
-        .set('X-Admin-Key', ADMIN_KEY);
+        .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
 
       expect(response.status).toBe(200);
       expect(response.body.data).toHaveLength(2);
@@ -92,14 +117,15 @@ describe('admin job-runs API (integration)', () => {
     });
 
     it('filters by a comma-separated status list', async () => {
+      await seedAdminUser();
       await createJobRun({ startedAt: new Date(), status: 'failed' });
       await createJobRun({ startedAt: new Date(), status: 'partial' });
       await createJobRun({ startedAt: new Date(), status: 'success' });
 
-      const app = createApp({ adminApiKey: ADMIN_KEY });
+      const app = createAppWithFakeAuth();
       const response = await request(app)
         .get('/api/v1/admin/job-runs?status=failed,partial')
-        .set('X-Admin-Key', ADMIN_KEY);
+        .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
 
       expect(response.status).toBe(200);
       const statuses = response.body.data.map((run: { status: string }) => run.status).sort();
@@ -107,10 +133,11 @@ describe('admin job-runs API (integration)', () => {
     });
 
     it('rejects a limit above 100 with a 400 VALIDATION_ERROR', async () => {
-      const app = createApp({ adminApiKey: ADMIN_KEY });
+      await seedAdminUser();
+      const app = createAppWithFakeAuth();
       const response = await request(app)
         .get('/api/v1/admin/job-runs?limit=101')
-        .set('X-Admin-Key', ADMIN_KEY);
+        .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
 
       expect(response.status).toBe(400);
       expect(response.body.error.code).toBe('VALIDATION_ERROR');
@@ -118,12 +145,13 @@ describe('admin job-runs API (integration)', () => {
 
     describe('GET /api/v1/admin/job-runs/:id', () => {
       it('returns the full document without __v for a known id', async () => {
+        await seedAdminUser();
         const run = await createJobRun({ startedAt: new Date() });
 
-        const app = createApp({ adminApiKey: ADMIN_KEY });
+        const app = createAppWithFakeAuth();
         const response = await request(app)
           .get(`/api/v1/admin/job-runs/${run._id.toString()}`)
-          .set('X-Admin-Key', ADMIN_KEY);
+          .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
 
         expect(response.status).toBe(200);
         expect(response.body.data.id).toBe(run._id.toString());
@@ -131,20 +159,22 @@ describe('admin job-runs API (integration)', () => {
       });
 
       it('returns 400 VALIDATION_ERROR for a malformed id', async () => {
-        const app = createApp({ adminApiKey: ADMIN_KEY });
+        await seedAdminUser();
+        const app = createAppWithFakeAuth();
         const response = await request(app)
           .get('/api/v1/admin/job-runs/not-an-object-id')
-          .set('X-Admin-Key', ADMIN_KEY);
+          .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
 
         expect(response.status).toBe(400);
         expect(response.body.error.code).toBe('VALIDATION_ERROR');
       });
 
       it('returns 404 NOT_FOUND for an unknown id', async () => {
-        const app = createApp({ adminApiKey: ADMIN_KEY });
+        await seedAdminUser();
+        const app = createAppWithFakeAuth();
         const response = await request(app)
           .get('/api/v1/admin/job-runs/507f1f77bcf86cd799439011')
-          .set('X-Admin-Key', ADMIN_KEY);
+          .set('Authorization', `Bearer ${ADMIN_TOKEN}`);
 
         expect(response.status).toBe(404);
         expect(response.body.error.code).toBe('NOT_FOUND');
@@ -152,26 +182,33 @@ describe('admin job-runs API (integration)', () => {
     });
   });
 
-  describe('when ADMIN_API_KEY is unset', () => {
-    // E2-14: toda ruta admin devuelve 404, indistinguible de una ruta que
-    // no existe, incluso con un header de clave adjunto.
-    it.each([
-      [
-        'GET /api/v1/admin/job-runs',
-        () => request(createApp({ adminApiKey: undefined })).get('/api/v1/admin/job-runs'),
-      ],
-      [
-        'GET /api/v1/admin/job-runs/:id',
-        () =>
-          request(createApp({ adminApiKey: undefined })).get(
-            '/api/v1/admin/job-runs/507f1f77bcf86cd799439011',
-          ),
-      ],
-    ])('E2-14: %s returns 404 NOT_FOUND', async (_label, makeRequest) => {
-      const response = await makeRequest().set('X-Admin-Key', ADMIN_KEY);
+  // E3-9 (rol `user` -> 403; rol `admin` -> 200, ya cubierto arriba).
+  it('E3-9: rejects an authenticated non-admin user with 403 FORBIDDEN', async () => {
+    const app = createAppWithFakeAuth();
+    const response = await request(app)
+      .get('/api/v1/admin/job-runs')
+      .set('Authorization', `Bearer ${USER_TOKEN}`);
 
-      expect(response.status).toBe(404);
-      expect(response.body.error.code).toBe('NOT_FOUND');
-    });
+    expect(response.status).toBe(403);
+    expect(response.body.error.code).toBe('FORBIDDEN');
+  });
+
+  // E3-10: el viejo header X-Admin-Key, sin token, ya no funciona.
+  it('E3-10: rejects the retired X-Admin-Key header with no token with 401 UNAUTHENTICATED', async () => {
+    const app = createAppWithFakeAuth();
+    const response = await request(app)
+      .get('/api/v1/admin/job-runs')
+      .set('X-Admin-Key', 'a'.repeat(32));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('UNAUTHENTICATED');
+  });
+
+  it('rejects a request with no Authorization header with 401 UNAUTHENTICATED', async () => {
+    const app = createAppWithFakeAuth();
+    const response = await request(app).get('/api/v1/admin/job-runs');
+
+    expect(response.status).toBe(401);
+    expect(response.body.error.code).toBe('UNAUTHENTICATED');
   });
 });

@@ -67,10 +67,28 @@ const baseEnvSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
   RATE_LIMIT_WINDOW_MIN: z.coerce.number().int().positive().default(15),
   STALE_POLL_THRESHOLD_MIN: z.coerce.number().int().positive().default(30),
-  // Opcional: la API arranca sin ella (las rutas de admin devuelven 404 —
-  // ver `requireAdminKey`). Cuando está presente debe ser lo suficientemente
-  // larga como para que forzar el header por fuerza bruta sea impracticable.
-  ADMIN_API_KEY: z.string().min(32, 'ADMIN_API_KEY must be at least 32 characters').optional(),
+
+  // --- auth-firebase: Firebase Admin, verificación de tokens y perfiles de usuario ---
+  // Las tres variables de la cuenta de servicio son opcionales a nivel de
+  // schema (igual que COINGECKO_API_KEY) para que el proceso pueda arrancar
+  // sin ellas cuando se usa el emulador de Auth; `assertFirebaseCredentials()`
+  // exige las tres salvo que FIREBASE_AUTH_EMULATOR_HOST esté configurado.
+  FIREBASE_PROJECT_ID: z.string().min(1).optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().min(1).optional(),
+  FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
+  // Solo la usan los scripts de desarrollo (auth:token) para llamar al REST
+  // API de Identity Toolkit; el proceso de la API nunca la necesita.
+  FIREBASE_WEB_API_KEY: z.string().min(1).optional(),
+  // Host:puerto del emulador local de Firebase Auth (por ejemplo
+  // 127.0.0.1:9099). Solo para desarrollo — ver assertFirebaseCredentials()
+  // y el guard de producción en src/integrations/firebase/admin.ts.
+  FIREBASE_AUTH_EMULATOR_HOST: z.string().min(1).optional(),
+  // Límite de requests por minuto por uid autenticado (limitador de tasa
+  // por usuario, además del límite global por IP). Default 120.
+  USER_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(120),
+  // Minutos de antigüedad de `lastSeenAt` antes de refrescarlo en un request
+  // autenticado (spec user-profile). Default 5.
+  LAST_SEEN_THROTTLE_MIN: z.coerce.number().int().positive().default(5),
 });
 
 // El valor por defecto de TRUST_PROXY, dependiente de NODE_ENV, se aplica
@@ -176,6 +194,66 @@ export function assertCoinGeckoApiKey(
     bootstrapLogger.fatal(
       { invalidVariables: ['COINGECKO_API_KEY'] },
       'Missing required environment variable COINGECKO_API_KEY for this entrypoint; refusing to start.',
+    );
+    process.exit(1);
+  }
+}
+
+/**
+ * Guarda de fallo rápido para las credenciales de la cuenta de servicio de
+ * Firebase (`firebase-admin-init`, tarea 1.2). Las tres variables son
+ * opcionales a nivel de schema para permitir el flujo con el emulador de
+ * Auth: cuando `FIREBASE_AUTH_EMULATOR_HOST` está configurado, esta guarda no
+ * exige nada. Cuando no lo está, exige las tres y falla rápido (log fatal +
+ * exit 1) listando por nombre las que falten, nunca sus valores — mismo
+ * patrón que {@link assertCoinGeckoApiKey}.
+ */
+export function assertFirebaseCredentials(
+  cfg: Config,
+  bootstrapLogger: Pick<Logger, 'fatal'>,
+): asserts cfg is Config & {
+  FIREBASE_PROJECT_ID: string;
+  FIREBASE_CLIENT_EMAIL: string;
+  FIREBASE_PRIVATE_KEY: string;
+} {
+  if (cfg.FIREBASE_AUTH_EMULATOR_HOST) {
+    return;
+  }
+
+  const requiredVariables = [
+    'FIREBASE_PROJECT_ID',
+    'FIREBASE_CLIENT_EMAIL',
+    'FIREBASE_PRIVATE_KEY',
+  ] as const;
+  const missing = requiredVariables.filter((variable) => !cfg[variable]);
+
+  if (missing.length > 0) {
+    bootstrapLogger.fatal(
+      { invalidVariables: missing },
+      'Missing required Firebase service account credentials and no ' +
+        'FIREBASE_AUTH_EMULATOR_HOST configured; refusing to start.',
+    );
+    process.exit(1);
+  }
+}
+
+/**
+ * Guarda de fallo rápido compartida por los scripts de desarrollo de
+ * auth-firebase que jamás deben correr contra un proyecto real (spec
+ * auth-dev-scripts, tarea 9.4): `auth:create-test-user` (crea cuentas con
+ * contraseñas conocidas) y `auth:token` (emite tokens de acceso completo).
+ * Mismo patrón de log-fatal-y-exit-1 que {@link assertCoinGeckoApiKey} y
+ * {@link assertFirebaseCredentials}.
+ */
+export function assertNotProduction(
+  cfg: Pick<Config, 'NODE_ENV'>,
+  bootstrapLogger: Pick<Logger, 'fatal'>,
+  scriptName: string,
+): void {
+  if (cfg.NODE_ENV === 'production') {
+    bootstrapLogger.fatal(
+      { script: scriptName },
+      `Refusing to run ${scriptName} with NODE_ENV=production.`,
     );
     process.exit(1);
   }

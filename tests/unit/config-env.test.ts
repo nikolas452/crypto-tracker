@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertCoinGeckoApiKey, EnvValidationError, parseEnv } from '../../src/config/env.js';
+import {
+  assertCoinGeckoApiKey,
+  assertFirebaseCredentials,
+  EnvValidationError,
+  parseEnv,
+} from '../../src/config/env.js';
 
-/** Tests unitarios de `parseEnv` y `assertCoinGeckoApiKey` de `src/config/env.ts`. */
+/** Tests unitarios de `parseEnv`, `assertCoinGeckoApiKey` y `assertFirebaseCredentials` de `src/config/env.ts`. */
 
 describe('parseEnv', () => {
   it('returns a fully-typed config with defaults applied for a valid source', () => {
@@ -28,6 +33,8 @@ describe('parseEnv', () => {
       RATE_LIMIT_MAX: 300,
       RATE_LIMIT_WINDOW_MIN: 15,
       STALE_POLL_THRESHOLD_MIN: 30,
+      USER_RATE_LIMIT_PER_MIN: 120,
+      LAST_SEEN_THROTTLE_MIN: 5,
     });
   });
 
@@ -221,25 +228,121 @@ describe('parseEnv', () => {
     expect(config.STALE_POLL_THRESHOLD_MIN).toBe(30);
   });
 
-  it('leaves ADMIN_API_KEY undefined when not provided', () => {
+  it('leaves the Firebase service-account variables undefined when not provided', () => {
     const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
 
-    expect(config.ADMIN_API_KEY).toBeUndefined();
+    expect(config.FIREBASE_PROJECT_ID).toBeUndefined();
+    expect(config.FIREBASE_CLIENT_EMAIL).toBeUndefined();
+    expect(config.FIREBASE_PRIVATE_KEY).toBeUndefined();
+    expect(config.FIREBASE_WEB_API_KEY).toBeUndefined();
+    expect(config.FIREBASE_AUTH_EMULATOR_HOST).toBeUndefined();
   });
 
-  it('accepts an ADMIN_API_KEY of at least 32 characters', () => {
+  it('accepts the Firebase service-account variables when provided', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      FIREBASE_PROJECT_ID: 'demo-project',
+      FIREBASE_CLIENT_EMAIL: 'sa@demo-project.iam.gserviceaccount.com',
+      FIREBASE_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n',
+    });
+
+    expect(config.FIREBASE_PROJECT_ID).toBe('demo-project');
+    expect(config.FIREBASE_CLIENT_EMAIL).toBe('sa@demo-project.iam.gserviceaccount.com');
+    expect(config.FIREBASE_PRIVATE_KEY).toContain('BEGIN PRIVATE KEY');
+  });
+
+  it('defaults USER_RATE_LIMIT_PER_MIN to 120 and LAST_SEEN_THROTTLE_MIN to 5', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.USER_RATE_LIMIT_PER_MIN).toBe(120);
+    expect(config.LAST_SEEN_THROTTLE_MIN).toBe(5);
+  });
+
+  it('coerces USER_RATE_LIMIT_PER_MIN and LAST_SEEN_THROTTLE_MIN from strings', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      USER_RATE_LIMIT_PER_MIN: '60',
+      LAST_SEEN_THROTTLE_MIN: '10',
+    });
+
+    expect(config.USER_RATE_LIMIT_PER_MIN).toBe(60);
+    expect(config.LAST_SEEN_THROTTLE_MIN).toBe(10);
+  });
+
+  it('no longer parses ADMIN_API_KEY', () => {
     const config = parseEnv({
       MONGODB_URI: 'mongodb://localhost:27017',
       ADMIN_API_KEY: 'a'.repeat(32),
     });
 
-    expect(config.ADMIN_API_KEY).toBe('a'.repeat(32));
+    expect(config).not.toHaveProperty('ADMIN_API_KEY');
+  });
+});
+
+describe('assertFirebaseCredentials', () => {
+  it('does not exit when all three service-account variables are present', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      FIREBASE_PROJECT_ID: 'demo-project',
+      FIREBASE_CLIENT_EMAIL: 'sa@demo-project.iam.gserviceaccount.com',
+      FIREBASE_PRIVATE_KEY: 'fake-key',
+    });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertFirebaseCredentials(config, logger);
+
+    expect(logger.fatal).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
   });
 
-  it('rejects an ADMIN_API_KEY shorter than 32 characters', () => {
-    expect(() =>
-      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', ADMIN_API_KEY: 'too-short' }),
-    ).toThrow(EnvValidationError);
+  it('does not exit when no credentials are present but an emulator host is configured', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099',
+    });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertFirebaseCredentials(config, logger);
+
+    expect(logger.fatal).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+  });
+
+  it('logs fatal and exits with code 1 when credentials are missing and no emulator is configured', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertFirebaseCredentials(config, logger);
+
+    expect(logger.fatal).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    const [loggedPayload] = logger.fatal.mock.calls[0] as [{ invalidVariables: string[] }];
+    expect(loggedPayload.invalidVariables).toEqual([
+      'FIREBASE_PROJECT_ID',
+      'FIREBASE_CLIENT_EMAIL',
+      'FIREBASE_PRIVATE_KEY',
+    ]);
+    exitSpy.mockRestore();
+  });
+
+  it('never includes the private key value in the fatal log', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      FIREBASE_PROJECT_ID: 'demo-project',
+    });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertFirebaseCredentials(config, logger);
+
+    const serialized = JSON.stringify(logger.fatal.mock.calls);
+    expect(serialized).not.toContain('fake-key');
+    exitSpy.mockRestore();
   });
 });
 

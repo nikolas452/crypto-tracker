@@ -1,13 +1,23 @@
-### Crypto Tracker API — manual requests (Stage 0: base setup, Stage 2: api-rest)
+### Crypto Tracker API — manual requests (Stage 0: base setup, Stage 2: api-rest,
+### Stage 3: auth-firebase)
 ### Use with the REST Client extension (VS Code) or any compatible .http runner.
 ### Run `npm run dev` first, then send requests against http://localhost:3000.
 ### Stage 2 requires a seeded catalog (`npm run seed:coins`) and at least one
 ### `poll-prices` run (`npm run job:poll-prices` or `npm run dev:worker`) for
-### non-empty responses; the admin requests additionally need `ADMIN_API_KEY`
-### set in `.env` — replace `<your-admin-api-key>` below with that value.
+### non-empty responses.
+### Stage 3 requests need a Firebase ID token: get one with
+### `npm run auth:create-test-user -- --email ... --password ...` followed by
+### `npm run --silent auth:token -- --email ... --password ...` (see the
+### README's "Firebase Auth: development scripts and the Auth emulator"
+### section), then replace `<your-id-token>` below with it. The admin requests
+### additionally need that user promoted with
+### `npm run user:set-role -- --email ... --role admin` (or created with
+### `auth:create-test-user --admin` directly). `ADMIN_API_KEY`/`X-Admin-Key`
+### no longer exist.
 
 @baseUrl = http://localhost:3000
-@adminApiKey = <your-admin-api-key>
+@idToken = <your-id-token>
+@adminIdToken = <your-admin-id-token>
 
 ### Liveness: never touches the database.
 GET {{baseUrl}}/health
@@ -90,25 +100,59 @@ GET {{baseUrl}}/api/v1/coins/bitcoin/stats?range=90d
 GET {{baseUrl}}/api/v1/status
 
 ### ============================================================
-### Stage 2 (api-rest): admin job-runs (provisional X-Admin-Key)
+### Stage 3 (auth-firebase): the authenticated user's own profile
 ### ============================================================
 
-### Without X-Admin-Key -> 401 UNAUTHENTICATED (E2-13), or 404 NOT_FOUND if
-### ADMIN_API_KEY is unset in .env (E2-14).
+### Without a token -> 401 UNAUTHENTICATED (E3-1).
+GET {{baseUrl}}/api/v1/me
+
+### With a valid token: provisions the profile on first call, then returns it.
+GET {{baseUrl}}/api/v1/me
+Authorization: Bearer {{idToken}}
+
+### Update the editable field.
+PATCH {{baseUrl}}/api/v1/me
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"displayName": "Nico"}
+
+### `role`/`email` are not editable -> 400 VALIDATION_ERROR (E3-8).
+PATCH {{baseUrl}}/api/v1/me
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"role": "admin"}
+
+### Deletes this application's own profile only (204); the Firebase account
+### survives and re-provisions an empty profile on the next authenticated call.
+DELETE {{baseUrl}}/api/v1/me
+Authorization: Bearer {{idToken}}
+
+### ============================================================
+### Stage 2/3: admin job-runs (requireAuth + requireRole('admin'))
+### ============================================================
+
+### Without a token -> 401 UNAUTHENTICATED (E3-10; the old X-Admin-Key header,
+### if sent instead, is simply ignored and still yields 401).
 GET {{baseUrl}}/api/v1/admin/job-runs
 
-### Paginated list, filtered by status, with the admin key.
+### Authenticated but not an admin -> 403 FORBIDDEN (E3-9).
+GET {{baseUrl}}/api/v1/admin/job-runs
+Authorization: Bearer {{idToken}}
+
+### Paginated list, filtered by status, with an admin token.
 GET {{baseUrl}}/api/v1/admin/job-runs?status=success,partial&limit=10
-X-Admin-Key: {{adminApiKey}}
+Authorization: Bearer {{adminIdToken}}
 
 ### Filtered by jobName and a startedAt range.
 GET {{baseUrl}}/api/v1/admin/job-runs?jobName=poll-prices&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z
-X-Admin-Key: {{adminApiKey}}
+Authorization: Bearer {{adminIdToken}}
 
 ### Job run detail by id (replace with a real _id from the list above).
 GET {{baseUrl}}/api/v1/admin/job-runs/651f1c2e8b1e2a0012a3b456
-X-Admin-Key: {{adminApiKey}}
+Authorization: Bearer {{adminIdToken}}
 
 ### Malformed id -> 400 VALIDATION_ERROR.
 GET {{baseUrl}}/api/v1/admin/job-runs/not-an-object-id
-X-Admin-Key: {{adminApiKey}}
+Authorization: Bearer {{adminIdToken}}
