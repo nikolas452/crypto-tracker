@@ -7,7 +7,9 @@ import { getJobRunById, listJobRuns } from './job-runs.service.js';
  * `GET /api/v1/admin/job-runs` (listado, paginado) y
  * `GET /api/v1/admin/job-runs/:id` (detalle) — spec admin-job-runs-api.
  * Montado bajo `/api/v1/admin` en `src/app.ts`, protegido por
- * `requireAdminKey`. Los route handlers solo validan la entrada y dan forma
+ * `requireAuth({ checkRevoked: true })` + `requireRole('admin')` (spec
+ * role-authorization; reemplazan al retirado `requireAdminKey`). Los route
+ * handlers solo validan la entrada y dan forma
  * a la respuesta HTTP; toda la lógica de consulta vive en
  * `job-runs.service.ts`, invocable sin ningún objeto de Express (5.9),
  * siguiendo la separación en capas de `coins.routes.ts`. `Cache-Control:

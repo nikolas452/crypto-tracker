@@ -26,8 +26,8 @@ export function cacheControlPublic(maxAgeSeconds: number) {
 
 /**
  * `Cache-Control: no-store` para endpoints que nunca deben cachearse: el
- * endpoint de status y toda ruta bajo `/api/v1/admin` (incluido el 404 que
- * produce `requireAdminKey` cuando `ADMIN_API_KEY` no está configurada).
+ * endpoint de status y toda ruta bajo `/api/v1/admin` (incluidos los 401/403
+ * que producen `requireAuth`/`requireRole` — spec role-authorization).
  */
 export function cacheControlNoStore(_req: Request, res: Response, next: NextFunction): void {
   res.setHeader('Cache-Control', 'no-store');

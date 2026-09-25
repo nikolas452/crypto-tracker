@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import { config, type Config } from '../config/env.js';
 import { CoinModel } from '../modules/coins/coins.model.js';
 import { JobRunModel } from '../modules/job-runs/job-runs.model.js';
+import { UserModel } from '../modules/users/users.model.js';
 
 /**
  * Garantiza, al arrancar, que las colecciones de Mongo tengan la forma
@@ -121,7 +122,11 @@ async function ensurePriceSnapshotsCollection(
  * depender de la construcción en segundo plano de Mongoose al conectar.
  */
 async function ensureDomainIndexes(): Promise<void> {
-  await Promise.all([CoinModel.createIndexes(), JobRunModel.createIndexes()]);
+  await Promise.all([
+    CoinModel.createIndexes(),
+    JobRunModel.createIndexes(),
+    UserModel.createIndexes(),
+  ]);
 }
 
 /**

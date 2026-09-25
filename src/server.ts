@@ -1,23 +1,31 @@
 import http from 'node:http';
-import { config } from './config/env.js';
+import { assertFirebaseCredentials, config } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { connectDb, disconnectDb } from './db/connect.js';
 import { ensureCollections } from './db/ensureCollections.js';
 import { createApp } from './app.js';
+import { initializeFirebaseAdmin } from './integrations/firebase/admin.js';
+import { createFirebaseTokenVerifier } from './integrations/firebase/tokenVerifier.js';
 
 /**
  * Punto de entrada del proceso de la API. Lee la config, conecta la base de
  * datos, y solo entonces construye la app y abre el socket, y registra la
  * secuencia ordenada de apagado. Este es el ÚNICO lugar en el código que
- * llama a `listen()`.
+ * llama a `listen()`, y el único lugar que construye el `TokenVerifier` real
+ * — todo lo demás lo recibe inyectado a través de `createApp(deps)`.
  */
 async function main(): Promise<void> {
+  assertFirebaseCredentials(config, logger);
+
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
     isProduction: config.NODE_ENV === 'production',
   });
   await ensureCollections(logger);
 
-  const app = createApp({ logger });
+  const firebaseApp = initializeFirebaseAdmin(config, logger);
+  const tokenVerifier = createFirebaseTokenVerifier(firebaseApp);
+
+  const app = createApp({ logger, tokenVerifier });
   const server = http.createServer(app);
 
   server.on('error', (err: NodeJS.ErrnoException) => {

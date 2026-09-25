@@ -14,12 +14,15 @@ export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'UNAUTHENTICATED'
   | 'TOKEN_EXPIRED'
+  | 'TOKEN_REVOKED'
   | 'FORBIDDEN'
+  | 'USER_DISABLED'
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'UNPROCESSABLE'
   | 'RATE_LIMITED'
   | 'UPSTREAM_ERROR'
+  | 'FIREBASE_UNAVAILABLE'
   | 'SERVICE_UNAVAILABLE'
   | 'INTERNAL_ERROR';
 
@@ -71,9 +74,23 @@ export class TokenExpiredError extends AppError {
   }
 }
 
+/** Token válido pero revocado (`auth/id-token-revoked`) — spec token-verification. */
+export class TokenRevokedError extends AppError {
+  constructor(message = 'Token revocado', options: AppErrorOptions = {}) {
+    super('TOKEN_REVOKED', 401, message, options);
+  }
+}
+
 export class ForbiddenError extends AppError {
   constructor(message = 'No tiene permiso', options: AppErrorOptions = {}) {
     super('FORBIDDEN', 403, message, options);
+  }
+}
+
+/** Cuenta de Firebase deshabilitada (`auth/user-disabled`) — spec token-verification. */
+export class UserDisabledError extends AppError {
+  constructor(message = 'Usuario deshabilitado', options: AppErrorOptions = {}) {
+    super('USER_DISABLED', 403, message, options);
   }
 }
 
@@ -104,6 +121,13 @@ export class RateLimitedError extends AppError {
 export class UpstreamError extends AppError {
   constructor(message = 'Falló un servicio externo', options: AppErrorOptions = {}) {
     super('UPSTREAM_ERROR', 502, message, options);
+  }
+}
+
+/** Firebase inalcanzable durante una verificación de revocación — spec token-verification. */
+export class FirebaseUnavailableError extends AppError {
+  constructor(message = 'Firebase no disponible', options: AppErrorOptions = {}) {
+    super('FIREBASE_UNAVAILABLE', 502, message, options);
   }
 }
 

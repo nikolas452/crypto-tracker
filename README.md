@@ -27,6 +27,16 @@ and the provisional-admin-key-protected `GET /api/v1/admin/job-runs` /
 and the `coins:rebuild-latest` / `backfill:history` maintenance scripts. See
 "API endpoints (Stage 2)" below for the full contract.
 
+**Stage 3 ("auth-firebase")** adds identity: Firebase Auth ID tokens verified
+by the backend (`requireAuth`), an application `users` profile provisioned
+just-in-time on first authenticated request, `GET`/`PATCH`/`DELETE /api/v1/me`,
+role-based authorization (`requireRole`) replacing the provisional admin key on
+`/api/v1/admin/*`, a per-uid rate limiter, and the development scripts needed
+to obtain a token without a frontend (`auth:create-test-user`, `auth:token`,
+`user:set-role`). See "API endpoints (Stage 2)" below (the `/me` and admin
+sections) and "Firebase Auth: development scripts and the Auth emulator"
+further down.
+
 ## Requirements
 
 - Node.js **24.x** (see `.node-version`). `engines.node` in `package.json` enforces
@@ -94,13 +104,25 @@ and the `coins:rebuild-latest` / `backfill:history` maintenance scripts. See
 | `RATE_LIMIT_MAX`             | integer                                 | No                          | `300`                                            | Max requests per IP per `RATE_LIMIT_WINDOW_MIN` window, enforced on `/api` (not `/health`)                                                                                                                                                                                                                                                                                                               |
 | `RATE_LIMIT_WINDOW_MIN`      | integer                                 | No                          | `15`                                             | Rate-limit window length, in minutes                                                                                                                                                                                                                                                                                                                                                                     |
 | `STALE_POLL_THRESHOLD_MIN`   | integer                                 | No                          | `30`                                             | `GET /api/v1/status` reports `pollPrices.stale: true` when no `success`/`partial` `poll-prices` run finished within this many minutes                                                                                                                                                                                                                                                                    |
-| `ADMIN_API_KEY`              | string                                  | No                          | — (unset)                                        | Minimum 32 characters when present. Required for `X-Admin-Key` on every `/api/v1/admin/*` route; when unset, those routes 404 as if they didn't exist. Generate one with `openssl rand -hex 32`. **Provisional**: this is a single shared secret with no rotation or per-caller identity, deliberately kept simple — it is replaced by real role-based authentication in the later `auth-firebase` stage |
+| `FIREBASE_PROJECT_ID`        | string                                  | **Only without an emulator**| —                                                | Firebase project id. Required together with `FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` unless `FIREBASE_AUTH_EMULATOR_HOST` is set (`assertFirebaseCredentials`)                                                                                                                                                                                                                                     |
+| `FIREBASE_CLIENT_EMAIL`      | string                                  | **Only without an emulator**| —                                                | Service account client email, from the same JSON key as `FIREBASE_PRIVATE_KEY`                                                                                                                                                                                                                                                                                                                            |
+| `FIREBASE_PRIVATE_KEY`       | string (**secret**)                     | **Only without an emulator**| —                                                | Service account private key. Escaped `\n` sequences are normalized to real newlines at startup; never log or commit this value                                                                                                                                                                                                                                                                           |
+| `FIREBASE_WEB_API_KEY`       | string                                  | No                          | —                                                | Only used by the `auth:token` dev script to call the Identity Toolkit REST API; the API process itself never needs it. Optional when `FIREBASE_AUTH_EMULATOR_HOST` is set (the emulator ignores the key's value)                                                                                                                                                                                        |
+| `FIREBASE_AUTH_EMULATOR_HOST`| string                                  | No (dev only)                | —                                                | e.g. `127.0.0.1:9099`. Points both `firebase-admin` and the dev scripts at the local Auth emulator instead of a real Firebase project. The process refuses to start if this is set while `NODE_ENV=production` (E3-13)                                                                                                                                                                                  |
+| `USER_RATE_LIMIT_PER_MIN`    | integer                                 | No                          | `120`                                            | Per-`uid` request budget, enforced after `requireAuth` in addition to the global per-IP limiter                                                                                                                                                                                                                                                                                                           |
+| `LAST_SEEN_THROTTLE_MIN`     | integer                                 | No                          | `5`                                              | Minimum age of `lastSeenAt` before an authenticated request refreshes it                                                                                                                                                                                                                                                                                                                                  |
 
 `src/config/env.ts` is the **only** module allowed to read `process.env` (enforced
 by an ESLint `no-restricted-properties` rule). Every other module imports the
 validated, frozen `config` object from there. If a required variable is missing or
 invalid, the process logs the invalid variable **names** (never their values) at
 `fatal` and exits with code 1.
+
+**`ADMIN_API_KEY` has been removed** (Stage 3, `auth-firebase`): the provisional
+`X-Admin-Key` header is gone, along with the variable itself and the
+`requireAdminKey` middleware. `/api/v1/admin/*` is now protected by
+`requireAuth({ checkRevoked: true })` + `requireRole('admin')` — see "API
+endpoints (Stage 2)" below.
 
 ## npm scripts
 
@@ -122,6 +144,9 @@ invalid, the process logs the invalid variable **names** (never their values) at
 | `npm run coins:rebuild-latest` | Recomputes `coins.latest` for every coin from its newest `price_snapshots` document; idempotent, safe to run any time (Stage 2)                                                                                  |
 | `npm run backfill:history`     | Imports `price_snapshots` history for one coin from CoinGecko's `market_chart` endpoint: `npm run backfill:history -- <coingeckoId> --days <n>` (Stage 2, optional capability — see "Backfilling history" below) |
 | `npm run perf:coins-list`      | Seeds a local dataset and measures RNF-2.1 latency for `GET /api/v1/coins`, `.../history` and `.../stats` (Stage 2) — see "Performance (RNF-2.1)" below                                                          |
+| `npm run auth:create-test-user`| Creates a Firebase user with a verified email; `-- --email <e> --password <p> [--admin]` also provisions and promotes its Mongo profile to `role: "admin"` (Stage 3). Refuses to run with `NODE_ENV=production`  |
+| `npm run auth:token`           | Signs in with email/password against the Identity Toolkit REST API and prints **only** the ID token to stdout: `npm run auth:token -- --email <e> --password <p>` (Stage 3). Refuses to run with `NODE_ENV=production` |
+| `npm run user:set-role`        | Finds a user by email and sets its Mongo `role`: `npm run user:set-role -- --email <e> --role <user\|admin>` (Stage 3). Prints the previous → new role, or an actionable error if the user has no profile yet   |
 
 ## Background worker (Stage 1)
 
@@ -437,15 +462,63 @@ required. `Cache-Control: no-store`.
 completed. The response deliberately never includes an error message, code or
 worker id — only whether the worker is alive.
 
+### `GET`, `PATCH`, `DELETE /api/v1/me`
+
+The authenticated user's own profile (spec me-endpoints). Requires
+`Authorization: Bearer <Firebase ID token>`; `DELETE` additionally checks
+token revocation (`checkRevoked: true`).
+
+**Documented limitation — `checkRevoked` is off by default:** `GET`/`PATCH
+/api/v1/me` (and every other route that doesn't explicitly pass
+`checkRevoked: true`) verify the token's signature but do **not** call
+Firebase to check whether it has been revoked. `verifyIdToken` without that
+check is a local, no-network-round-trip operation; adding one on every
+request would trade a rare worst case for a cost paid by every read. The
+consequence: a user disabled or deleted in Firebase keeps ordinary access to
+these routes until their existing ID token naturally expires (at most one
+hour). Only the operations that can do real damage — `DELETE /api/v1/me` and
+everything under `/api/v1/admin/*` — pass `checkRevoked: true` and take effect
+immediately. See design.md's "Decisions" section for the full rationale.
+
+- `GET /api/v1/me` — `{ data: { id, email, emailVerified, displayName, role, createdAt } }`.
+- `PATCH /api/v1/me` — strict body `{ displayName?: string | null }`, with at
+  least that field present. It's the only editable field: `email` and `role`
+  are both rejected with `400 VALIDATION_ERROR`, same as any other unknown
+  field.
+- `DELETE /api/v1/me` — `204` with no body.
+
+**`DELETE /api/v1/me` only removes this application's own data — it never
+touches the underlying Firebase account.** The Firebase account keeps working
+exactly as before, so if the same, still-valid ID token is used again for any
+authenticated request afterwards, a brand-new, empty profile
+(`role: "user"`, `displayName: null`) is silently re-provisioned for that
+`firebaseUid` — the same just-in-time provisioning that creates a profile the
+first time a given Firebase user is ever seen. This is a deliberate,
+documented trade-off (see the Open Questions in `openspec/changes/auth-firebase/design.md`),
+not an oversight: to actually stop that user from coming back, the
+corresponding Firebase account has to be deleted separately (e.g. from the
+Firebase console, or with `getAuth().deleteUser(uid)`), which this endpoint
+does not do on its own.
+
 ### `GET /api/v1/admin/job-runs` and `GET /api/v1/admin/job-runs/:id`
 
-Protected by the provisional `X-Admin-Key` header — see `ADMIN_API_KEY` in
-"Environment variables" above. `Cache-Control: no-store`.
+Protected by `requireAuth({ checkRevoked: true })` + `requireRole('admin')`
+(spec role-authorization) — every `/api/v1/admin/*` route requires
+`Authorization: Bearer <Firebase ID token>` belonging to a Mongo profile with
+`role: "admin"`. `Cache-Control: no-store`.
 
-- **Unconfigured `ADMIN_API_KEY`:** every `/api/v1/admin/*` route responds
-  `404 NOT_FOUND`, indistinguishable from a route that doesn't exist.
-- **Missing or wrong `X-Admin-Key`:** `401 UNAUTHENTICATED`.
-- **Correct key:** the request goes through.
+- **Missing or malformed token:** `401 UNAUTHENTICATED`.
+- **Valid token, `role: "user"`:** `403 FORBIDDEN`.
+- **Valid token, `role: "admin"`:** the request goes through.
+
+There's no registration or promotion endpoint: the first admin has to be
+created out-of-band with `npm run auth:create-test-user -- --email <e>
+--password <p> --admin` (dev/emulator) or promoted with `npm run
+user:set-role -- --email <e> --role admin` after that user has authenticated
+at least once — see "Firebase Auth: development scripts and the Auth
+emulator" below. The old `X-Admin-Key` header and `ADMIN_API_KEY` variable no
+longer exist; a request that still sends `X-Admin-Key` and no token gets the
+same `401 UNAUTHENTICATED` as any other unauthenticated request.
 
 | Param (list only) | Type                 | Notes                                                               |
 | ----------------- | -------------------- | ------------------------------------------------------------------- |
@@ -590,6 +663,91 @@ genuinely-polled point in favour of a lower-resolution imported one
 imported vs. skipped, and prompts for confirmation before running (`--yes`/
 `--force` to skip the prompt) since it consumes one call from CoinGecko's
 monthly quota per invocation.
+
+## Firebase Auth: development scripts and the Auth emulator
+
+There is no frontend in this project, so obtaining a Firebase ID token for
+manual testing is itself a problem the three `auth:*`/`user:*` scripts exist
+to solve (spec auth-dev-scripts). Two setups work:
+
+### Option A — a real Firebase project
+
+1. Create a Firebase project with the **Email/Password** sign-in provider
+   enabled, generate a service-account key (Project settings → Service
+   accounts → Generate new private key), and set `FIREBASE_PROJECT_ID`,
+   `FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` in `.env` from it.
+2. Set `FIREBASE_WEB_API_KEY` (Project settings → General → Web API Key) so
+   `auth:token` can call the Identity Toolkit REST API.
+3. Create a test user and obtain a token as shown below.
+
+### Option B — the local Auth emulator (no real Firebase project needed)
+
+1. Install the [Firebase CLI](https://firebase.google.com/docs/cli) (`npm
+   install -g firebase-tools`) and a Java runtime — the emulator suite
+   requires **JDK 11 or higher** ([Firebase's own prerequisites](https://firebase.google.com/docs/emulator-suite/install_and_configure)).
+2. Start only the Auth emulator:
+
+   ```bash
+   firebase emulators:start --only auth
+   ```
+
+   By default it listens on `127.0.0.1:9099`.
+3. Set in `.env`:
+
+   ```
+   FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099
+   ```
+
+   With this set, `initializeFirebaseAdmin()` logs a `warn` and both
+   `firebase-admin` and the dev scripts talk to the emulator instead of a
+   real project — `FIREBASE_PROJECT_ID`/`FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY`
+   and `FIREBASE_WEB_API_KEY` are not required in this mode
+   (`assertFirebaseCredentials`; `auth:token` falls back to a placeholder
+   API key the emulator ignores). The emulator's data is in-memory only and
+   resets every time it restarts. **Never set this in production** — the
+   process refuses to start if it's combined with `NODE_ENV=production`
+   (E3-13).
+
+### Obtaining and using a token (either option)
+
+```bash
+# 1. Create a test user (add --admin to also provision an admin Mongo profile)
+npm run auth:create-test-user -- --email test@example.com --password Passw0rd!
+
+# 2. Get an ID token — --silent avoids npm's own banner lines polluting stdout
+TOKEN=$(npm run --silent auth:token -- --email test@example.com --password Passw0rd!)
+
+# 3. Call an authenticated endpoint
+curl http://localhost:3000/api/v1/me -H "Authorization: Bearer $TOKEN"
+
+# 4. Promote (or demote) a user that has already authenticated at least once
+npm run user:set-role -- --email test@example.com --role admin
+```
+
+`user:set-role` reports "no Mongo profile found" for an email that has never
+successfully authenticated (its profile is only created just-in-time on the
+first valid token, or by `auth:create-test-user --admin`) — the message tells
+you to authenticate once first, or use `auth:create-test-user`.
+
+### E3-14 — manual verification: the documented emulator workflow works end-to-end
+
+This scenario is documented, not automated (an automated version needs a
+running emulator this project's CI/sandbox doesn't provide — see the optional
+suite in `tests/integration/`, skipped when `FIREBASE_AUTH_EMULATOR_HOST` is
+unset). Verify it by hand:
+
+1. Follow "Option B" above to start the emulator and point `.env` at it.
+2. Run `npm run dev` in one terminal.
+3. In another terminal, run the four commands under "Obtaining and using a
+   token" above.
+4. **Expected:** step 1 prints `Created Firebase user: uid=... email=...`;
+   step 2's `$TOKEN` is a single non-empty JWT-looking string with nothing
+   else around it; step 3 responds `200` with
+   `{ "data": { "email": "test@example.com", "role": "user", ... } }`
+   (freshly provisioned); step 4 prints
+   `Role for test@example.com: user -> admin`, and a repeat of step 3
+   afterwards still responds `200` (the token itself doesn't change, only
+   the stored role — which the next request re-reads).
 
 ## Manual verification steps
 

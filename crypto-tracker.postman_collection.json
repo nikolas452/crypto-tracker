@@ -2,14 +2,41 @@
   "info": {
     "_postman_id": "b6f2a1a0-6e3e-4b1a-9e7a-4f2c8f1c9d10",
     "name": "Crypto Tracker API",
-    "description": "Stage 0 (base setup) + Stage 2 (api-rest) endpoints. Mirrors requests.http.\n\nRun `npm run dev` first. Stage 2 requests need a seeded catalog (`npm run seed:coins`) and at least one poll-prices run (`npm run job:poll-prices` or `npm run dev:worker`) for non-empty responses. Admin requests need `ADMIN_API_KEY` set in `.env` and the same value in the `adminApiKey` collection variable.",
+    "description": "Stage 0 (base setup) + Stage 2 (api-rest) + Stage 3 (auth-firebase) endpoints. Mirrors requests.http.\n\nRun `npm run dev` first. Stage 2 requests need a seeded catalog (`npm run seed:coins`) and at least one poll-prices run (`npm run job:poll-prices` or `npm run dev:worker`) for non-empty responses.\n\nStage 3 (auth): the old `X-Admin-Key` header is gone. Every authenticated request needs a Firebase ID token. The 'Auth (Firebase)' folder gets you one straight from Postman against the local Auth emulator (`firebase emulators:start --only auth`), no CLI script required:\n1. Run 'Sign up (create test user)' once per test account — it also stores the token in `idToken`.\n2. Call 'Me > Get my profile' once with that token to provision the Mongo profile.\n3. For admin requests, repeat steps 1-2 with the `adminEmail`/`adminPassword` variables to get `adminIdToken`, then run `npm run user:set-role -- --email {{adminEmail}} --role admin` from a terminal (Postman can create the Firebase account and provision the Mongo profile, but promoting to admin is a deliberate out-of-band step — see design.md).\n\nTo test against a real Firebase project instead of the emulator, change `authApiBaseUrl` to `https://identitytoolkit.googleapis.com/v1` and set `firebaseWebApiKey` to your project's real Web API Key (Firebase console -> Project settings -> General).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
-    { "key": "adminApiKey", "value": "<your-admin-api-key>", "type": "string" },
     { "key": "coingeckoId", "value": "bitcoin", "type": "string" },
-    { "key": "jobRunId", "value": "651f1c2e8b1e2a0012a3b456", "type": "string" }
+    { "key": "jobRunId", "value": "651f1c2e8b1e2a0012a3b456", "type": "string" },
+    {
+      "key": "authApiBaseUrl",
+      "value": "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1",
+      "type": "string",
+      "description": "Local Auth emulator by default. For a real Firebase project use https://identitytoolkit.googleapis.com/v1."
+    },
+    {
+      "key": "firebaseWebApiKey",
+      "value": "fake-api-key-for-emulator",
+      "type": "string",
+      "description": "The emulator ignores this value (only checks it's present). Set your real Web API Key when authApiBaseUrl points at Google."
+    },
+    { "key": "testEmail", "value": "test@example.com", "type": "string" },
+    { "key": "testPassword", "value": "Password123!", "type": "string" },
+    {
+      "key": "idToken",
+      "value": "",
+      "type": "string",
+      "description": "Auto-filled by 'Auth (Firebase) > Sign up' / 'Sign in' below."
+    },
+    { "key": "adminEmail", "value": "admin@example.com", "type": "string" },
+    { "key": "adminPassword", "value": "Password123!", "type": "string" },
+    {
+      "key": "adminIdToken",
+      "value": "",
+      "type": "string",
+      "description": "Auto-filled by 'Auth (Firebase) > Sign up as admin' / 'Sign in as admin' below. Needs npm run user:set-role to actually carry the admin role in Mongo."
+    }
   ],
   "item": [
     {
@@ -305,7 +332,215 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "status"]
             },
-            "description": "Public worker-health summary - no admin key required."
+            "description": "Public worker-health summary - no token required."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth (Firebase)",
+      "item": [
+        {
+          "name": "Sign up (create test user)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('signUp returned an idToken', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().idToken).to.be.a('string');",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('idToken', pm.response.json().idToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"returnSecureToken\": true\n}"
+            },
+            "url": {
+              "raw": "{{authApiBaseUrl}}/accounts:signUp?key={{firebaseWebApiKey}}",
+              "host": ["{{authApiBaseUrl}}"],
+              "path": ["accounts:signUp"],
+              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+            },
+            "description": "Calls Firebase's Identity Toolkit REST API directly (the same one `npm run auth:create-test-user` and `npm run auth:token` use) — no CLI needed. Run once per email: a second run fails with EMAIL_EXISTS, use 'Sign in' instead. Saves the ID token into the `idToken` collection variable. Equivalent script: `npm run auth:create-test-user -- --email {{testEmail}} --password {{testPassword}}`."
+          }
+        },
+        {
+          "name": "Sign in (get ID token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('signIn returned an idToken', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().idToken).to.be.a('string');",
+                  "});",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('idToken', pm.response.json().idToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"returnSecureToken\": true\n}"
+            },
+            "url": {
+              "raw": "{{authApiBaseUrl}}/accounts:signInWithPassword?key={{firebaseWebApiKey}}",
+              "host": ["{{authApiBaseUrl}}"],
+              "path": ["accounts:signInWithPassword"],
+              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+            },
+            "description": "Use once the account already exists. Saves the ID token into `idToken`. Equivalent script: `npm run auth:token -- --email {{testEmail}} --password {{testPassword}}`. ID tokens expire after 1 hour - rerun this to refresh `idToken`."
+          }
+        },
+        {
+          "name": "Sign up as admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('adminIdToken', pm.response.json().idToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\",\n  \"returnSecureToken\": true\n}"
+            },
+            "url": {
+              "raw": "{{authApiBaseUrl}}/accounts:signUp?key={{firebaseWebApiKey}}",
+              "host": ["{{authApiBaseUrl}}"],
+              "path": ["accounts:signUp"],
+              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+            },
+            "description": "Creates the Firebase account for the future admin and saves its token into `adminIdToken`. This alone does NOT grant the admin role — it only exists in Firebase, not yet in Mongo. Next: call 'Me > Get my profile' with `adminIdToken` once to provision it, then from a terminal run `npm run user:set-role -- --email {{adminEmail}} --role admin` (or skip both steps with `npm run auth:create-test-user -- --email {{adminEmail}} --password {{adminPassword}} --admin`, then just use 'Sign in as admin' below to get the token)."
+          }
+        },
+        {
+          "name": "Sign in as admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('adminIdToken', pm.response.json().idToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\",\n  \"returnSecureToken\": true\n}"
+            },
+            "url": {
+              "raw": "{{authApiBaseUrl}}/accounts:signInWithPassword?key={{firebaseWebApiKey}}",
+              "host": ["{{authApiBaseUrl}}"],
+              "path": ["accounts:signInWithPassword"],
+              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+            },
+            "description": "Refreshes `adminIdToken` once the admin account exists in Firebase and already has role=admin in Mongo (see 'Sign up as admin')."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Me",
+      "item": [
+        {
+          "name": "Get my profile - no token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
+            "description": "401 UNAUTHENTICATED - no Authorization header."
+          }
+        },
+        {
+          "name": "Get my profile",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
+            "description": "E3-4: first call with a valid token for an unknown uid just-in-time provisions the Mongo profile and returns { data: { id, email, emailVerified, displayName, role, createdAt } }. Run 'Auth (Firebase) > Sign up' or 'Sign in' first to get `idToken`."
+          }
+        },
+        {
+          "name": "Update display name",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"displayName\": \"Nico\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
+            "description": "E3-8: the only editable field. `displayName: null` clears it."
+          }
+        },
+        {
+          "name": "Update display name - empty body -> 400",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
+            "description": "400 VALIDATION_ERROR - at least one field is required, and displayName is the only one that exists."
+          }
+        },
+        {
+          "name": "Update role -> 400 (not editable here)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"role\": \"admin\"\n}" },
+            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
+            "description": "E3-8: 400 VALIDATION_ERROR - the schema is .strict(), role is not an accepted field. Privilege escalation via PATCH /me is impossible by design (design.md)."
+          }
+        },
+        {
+          "name": "Delete my account",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
+            "description": "E3-11: 204, deletes the Mongo document only. Uses checkRevoked: true (destructive operation). The Firebase account itself is untouched - calling 'Get my profile' again with the same (still-valid) token re-provisions a brand-new empty profile. See README."
           }
         }
       ]
@@ -314,7 +549,7 @@
       "name": "Admin - Job Runs",
       "item": [
         {
-          "name": "List job runs - no key -> 401/404",
+          "name": "List job runs - no token -> 401",
           "request": {
             "method": "GET",
             "header": [],
@@ -323,14 +558,40 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "admin", "job-runs"]
             },
-            "description": "401 UNAUTHENTICATED (E2-13) if ADMIN_API_KEY is set, or 404 NOT_FOUND (E2-14) if it's unset."
+            "description": "401 UNAUTHENTICATED - requireAuth runs before requireRole."
+          }
+        },
+        {
+          "name": "List job runs - old X-Admin-Key header -> 401",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Admin-Key", "value": "whatever-this-no-longer-exists" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/job-runs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "job-runs"]
+            },
+            "description": "E3-10: the retired X-Admin-Key header is not read anywhere anymore - with no Authorization header this is still just a 401, same as any other unauthenticated request."
+          }
+        },
+        {
+          "name": "List job runs - non-admin token -> 403",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/job-runs",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "job-runs"]
+            },
+            "description": "E3-9: a valid token whose Mongo role is still the default 'user' -> 403 FORBIDDEN."
           }
         },
         {
           "name": "List job runs (filtered by status)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "X-Admin-Key", "value": "{{adminApiKey}}" }],
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs?status=success,partial&limit=10",
               "host": ["{{baseUrl}}"],
@@ -339,14 +600,15 @@
                 { "key": "status", "value": "success,partial" },
                 { "key": "limit", "value": "10" }
               ]
-            }
+            },
+            "description": "E3-9: role=admin -> 200. Needs `adminIdToken` from a user actually promoted with npm run user:set-role."
           }
         },
         {
           "name": "List job runs (filtered by jobName + date range)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "X-Admin-Key", "value": "{{adminApiKey}}" }],
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs?jobName=poll-prices&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z",
               "host": ["{{baseUrl}}"],
@@ -363,7 +625,7 @@
           "name": "Job run detail",
           "request": {
             "method": "GET",
-            "header": [{ "key": "X-Admin-Key", "value": "{{adminApiKey}}" }],
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs/{{jobRunId}}",
               "host": ["{{baseUrl}}"],
@@ -376,7 +638,7 @@
           "name": "Job run detail - malformed id -> 400",
           "request": {
             "method": "GET",
-            "header": [{ "key": "X-Admin-Key", "value": "{{adminApiKey}}" }],
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs/not-an-object-id",
               "host": ["{{baseUrl}}"],
