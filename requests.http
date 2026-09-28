@@ -1,5 +1,5 @@
 ### Crypto Tracker API — manual requests (Stage 0: base setup, Stage 2: api-rest,
-### Stage 3: auth-firebase)
+### Stage 3: auth-firebase, Stage 4: watchlists)
 ### Use with the REST Client extension (VS Code) or any compatible .http runner.
 ### Run `npm run dev` first, then send requests against http://localhost:3000.
 ### Stage 2 requires a seeded catalog (`npm run seed:coins`) and at least one
@@ -155,4 +155,128 @@ Authorization: Bearer {{adminIdToken}}
 
 ### Malformed id -> 400 VALIDATION_ERROR.
 GET {{baseUrl}}/api/v1/admin/job-runs/not-an-object-id
+Authorization: Bearer {{adminIdToken}}
+
+### ============================================================
+### Stage 4 (watchlists): the authenticated user's own watchlist
+### ============================================================
+
+### Without a token -> 401 UNAUTHENTICATED.
+GET {{baseUrl}}/api/v1/me/watchlist
+
+### List the caller's watchlist (default sort: addedAt desc).
+GET {{baseUrl}}/api/v1/me/watchlist
+Authorization: Bearer {{idToken}}
+
+### Sorted by 24h change, descending (E4-13).
+GET {{baseUrl}}/api/v1/me/watchlist?sort=change24h&order=desc
+Authorization: Bearer {{idToken}}
+
+### Unknown query param -> 400 VALIDATION_ERROR (no pagination params accepted here).
+GET {{baseUrl}}/api/v1/me/watchlist?page=1
+Authorization: Bearer {{idToken}}
+
+### Add a coin (201 + Location header). Requires bitcoin to exist and be active
+### (seeded by default — see "Getting started" / seed:coins).
+POST {{baseUrl}}/api/v1/me/watchlist
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "bitcoin", "note": "largo plazo"}
+
+### Adding the same coin again -> 409 CONFLICT (E4-2).
+POST {{baseUrl}}/api/v1/me/watchlist
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "bitcoin"}
+
+### An unknown or inactive coingeckoId -> 404 NOT_FOUND (E4-3).
+POST {{baseUrl}}/api/v1/me/watchlist
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "no-existe"}
+
+### A client-supplied userId is rejected as an unknown field -> 400 VALIDATION_ERROR (RF-4.5).
+POST {{baseUrl}}/api/v1/me/watchlist
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "bitcoin", "userId": "000000000000000000000000"}
+
+### Update the note (mixed-case path id is normalized to lowercase first).
+PATCH {{baseUrl}}/api/v1/me/watchlist/Bitcoin
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"note": "actualizado"}
+
+### Patching a coin not followed -> 404 NOT_FOUND (E4-7).
+PATCH {{baseUrl}}/api/v1/me/watchlist/ethereum
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"note": "no la sigo"}
+
+### Remove a coin — always 204, even if it was never followed (E4-6).
+DELETE {{baseUrl}}/api/v1/me/watchlist/bitcoin
+Authorization: Bearer {{idToken}}
+
+### A malformed coingeckoId -> 400 VALIDATION_ERROR.
+DELETE {{baseUrl}}/api/v1/me/watchlist/Not_Valid!
+Authorization: Bearer {{idToken}}
+
+### ============================================================
+### Stage 4 (watchlists): admin coin management (requireAuth + requireRole('admin'))
+### ============================================================
+
+### Authenticated but not an admin -> 403 FORBIDDEN (E4-9).
+POST {{baseUrl}}/api/v1/admin/coins
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "bitcoin"}
+
+### Paginated list, including inactive coins, each with watchersCount.
+GET {{baseUrl}}/api/v1/admin/coins
+Authorization: Bearer {{adminIdToken}}
+
+### Filtered to only inactive coins.
+GET {{baseUrl}}/api/v1/admin/coins?isActive=false
+Authorization: Bearer {{adminIdToken}}
+
+### Add a new coin — validated against CoinGecko first (consumes one API call).
+### 201 if it's new, 200 if it existed inactive (reactivated), 409 if already active.
+POST {{baseUrl}}/api/v1/admin/coins
+Authorization: Bearer {{adminIdToken}}
+Content-Type: application/json
+
+{"coingeckoId": "chainlink"}
+
+### An id CoinGecko doesn't recognize -> 422 UNPROCESSABLE / UNKNOWN_COINGECKO_ID (E4-10).
+POST {{baseUrl}}/api/v1/admin/coins
+Authorization: Bearer {{adminIdToken}}
+Content-Type: application/json
+
+{"coingeckoId": "not-a-real-coingecko-id"}
+
+### Deactivate a coin — 200 with the coin and its watchersCount, so the admin
+### sees the blast radius before/after (E4-8).
+PATCH {{baseUrl}}/api/v1/admin/coins/bitcoin
+Authorization: Bearer {{adminIdToken}}
+Content-Type: application/json
+
+{"isActive": false}
+
+### Reactivate it.
+PATCH {{baseUrl}}/api/v1/admin/coins/bitcoin
+Authorization: Bearer {{adminIdToken}}
+Content-Type: application/json
+
+{"isActive": true}
+
+### No DELETE endpoint exists for coins (falls through to the global 404 —
+### deleting would orphan watchlist references and price history).
+DELETE {{baseUrl}}/api/v1/admin/coins/bitcoin
 Authorization: Bearer {{adminIdToken}}

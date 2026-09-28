@@ -4,7 +4,7 @@ import { getUser } from '../../lib/getUser.js';
 import { requireAuth } from '../../middlewares/requireAuth.js';
 import { patchMeBodySchema } from './users.schemas.js';
 import { toUserMeDto } from './users.dto.js';
-import { deleteUserById, updateDisplayName } from './users.service.js';
+import { deleteAccount, updateDisplayName } from './users.service.js';
 
 /**
  * `GET`/`PATCH`/`DELETE /api/v1/me` (specs me-endpoints): perfil del usuario
@@ -48,7 +48,10 @@ export function createUsersRouter(userRateLimiter: RequestHandler): Router {
     async (req, res, next) => {
       try {
         const currentUser = getUser(req);
-        await deleteUserById(currentUser.id);
+        // RF-4.7 / spec account-deletion-cascade: delega en el orquestador
+        // en lugar de borrar el documento de `users` acá directamente, así
+        // los dependientes (watchlist) se borran primero.
+        await deleteAccount(currentUser.id);
 
         res.status(204).send();
       } catch (error) {

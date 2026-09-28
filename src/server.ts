@@ -1,11 +1,12 @@
 import http from 'node:http';
-import { assertFirebaseCredentials, config } from './config/env.js';
+import { assertCoinGeckoApiKey, assertFirebaseCredentials, config } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { connectDb, disconnectDb } from './db/connect.js';
 import { ensureCollections } from './db/ensureCollections.js';
 import { createApp } from './app.js';
 import { initializeFirebaseAdmin } from './integrations/firebase/admin.js';
 import { createFirebaseTokenVerifier } from './integrations/firebase/tokenVerifier.js';
+import { createCoinGeckoClient } from './integrations/coingecko/coingecko.client.js';
 
 /**
  * Punto de entrada del proceso de la API. Lee la config, conecta la base de
@@ -16,6 +17,10 @@ import { createFirebaseTokenVerifier } from './integrations/firebase/tokenVerifi
  */
 async function main(): Promise<void> {
   assertFirebaseCredentials(config, logger);
+  // RF-4.8: los endpoints de administración de monedas llaman a CoinGecko
+  // para validar un `coingeckoId`, así que la API también falla rápido si
+  // falta la clave — ya no es una guarda exclusiva del worker/scripts.
+  assertCoinGeckoApiKey(config, logger);
 
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
     isProduction: config.NODE_ENV === 'production',
@@ -25,7 +30,19 @@ async function main(): Promise<void> {
   const firebaseApp = initializeFirebaseAdmin(config, logger);
   const tokenVerifier = createFirebaseTokenVerifier(firebaseApp);
 
-  const app = createApp({ logger, tokenVerifier });
+  // Único lugar (junto con worker.ts y los scripts) que construye el
+  // cliente real de CoinGecko — todo lo demás lo recibe inyectado a través
+  // de `createApp(deps)` (tarea 1.2).
+  const coingecko = createCoinGeckoClient({
+    baseUrl: config.COINGECKO_BASE_URL,
+    apiKey: config.COINGECKO_API_KEY,
+    timeoutMs: config.COINGECKO_TIMEOUT_MS,
+    maxRetries: config.COINGECKO_MAX_RETRIES,
+    maxIdsPerCall: config.COINGECKO_MAX_IDS_PER_CALL,
+    logger,
+  });
+
+  const app = createApp({ logger, tokenVerifier, coingecko });
   const server = http.createServer(app);
 
   server.on('error', (err: NodeJS.ErrnoException) => {

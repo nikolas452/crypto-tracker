@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
+import type { CoinGeckoClient } from '../integrations/coingecko/coingecko.types.js';
 
 /**
  * Chequeos de disponibilidad ("readiness") usados por `GET /health/ready`,
- * incluyendo el chequeo de conexión a MongoDB.
+ * incluyendo el chequeo de conexión a MongoDB y el chequeo opcional de
+ * CoinGecko (spec health-checks, RF-4.8).
  */
 
 /**
@@ -44,6 +46,27 @@ export function createMongoReadinessCheck(
         throw new Error('Mongo connection has no database handle');
       }
       await withTimeout(db.admin().ping(), MONGO_PING_TIMEOUT_MS);
+    },
+  };
+}
+
+const COINGECKO_PING_TIMEOUT_MS = 2000;
+
+/**
+ * Chequeo de disponibilidad opcional para CoinGecko (spec health-checks:
+ * "check opcional coingecko, deshabilitado por defecto"). Solo se agrega a
+ * `readinessChecks` cuando `COINGECKO_READINESS_ENABLED` está habilitado
+ * (`src/app.ts`) — una caída de CoinGecko nunca debe sacar a la API de
+ * rotación por sí sola, así que este chequeo existe solo para diagnóstico
+ * manual.
+ */
+export function createCoinGeckoReadinessCheck(
+  client: Pick<CoinGeckoClient, 'ping'>,
+): ReadinessCheck {
+  return {
+    name: 'coingecko',
+    async check() {
+      await withTimeout(client.ping(), COINGECKO_PING_TIMEOUT_MS);
     },
   };
 }

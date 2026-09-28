@@ -2,6 +2,7 @@ import type { Types } from 'mongoose';
 import { config, type Config } from '../../config/env.js';
 import { logger as defaultLogger } from '../../lib/logger.js';
 import { maskEmail } from '../../lib/maskEmail.js';
+import { deleteAllWatchlistItemsForUser } from '../watchlist/watchlist.service.js';
 import { UserModel, type UserRole } from './users.model.js';
 import type { VerifiedIdentity } from '../../integrations/firebase/tokenVerifier.js';
 
@@ -102,7 +103,9 @@ export function createUsersRepo(): UsersRepo {
 
 /** `true` cuando `error` es el error de clave duplicada de MongoDB (E11000). */
 function isDuplicateKeyError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 11000;
+  return (
+    typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 11000
+  );
 }
 
 function toUserRecord(doc: UserLean): UserRecord {
@@ -240,15 +243,29 @@ export async function updateDisplayName(
 }
 
 /**
- * Elimina el documento de `users` identificado por su `_id` de Mongo (spec
- * me-endpoints: `DELETE /api/v1/me`). Nunca toca la cuenta de Firebase — un
- * request posterior con un token todavía válido vuelve a aprovisionar un
- * perfil vacío a través de `resolveFromIdentity` (design.md, documentado
- * también en el README).
+ * Orquestador de borrado de cuenta (RF-4.7 / spec account-deletion-cascade):
+ * único punto de entrada para eliminar los datos de un usuario, llamado por
+ * `DELETE /api/v1/me`. Borra primero los dependientes y recién después el
+ * documento de `users` — si el proceso se interrumpe a mitad de camino,
+ * repetir la llamada completa sin error (ambos pasos son idempotentes:
+ * `deleteMany`/`deleteOne` sobre documentos que ya no existen simplemente no
+ * hacen nada).
+ *
+ * Cada módulo borra sus propios datos: este servicio llama a
+ * `deleteAllWatchlistItemsForUser` (la función de borrado del propio módulo
+ * de watchlist) en lugar de hacer `WatchlistItemModel.deleteMany(...)`
+ * directamente — así el módulo de usuarios nunca necesita conocer la forma
+ * de una colección ajena, y una etapa futura (alertas, notificaciones)
+ * extiende esta cascada agregando una llamada más, no conocimiento de otro
+ * schema (design.md).
+ *
+ * Nunca toca la cuenta de Firebase — un request posterior con un token
+ * todavía válido vuelve a aprovisionar un perfil vacío a través de
+ * `resolveFromIdentity` (design.md, documentado también en el README).
  */
-export async function deleteUserById(id: string): Promise<boolean> {
-  const result = await UserModel.deleteOne({ _id: id }).exec();
-  return result.deletedCount > 0;
+export async function deleteAccount(userId: string): Promise<void> {
+  await deleteAllWatchlistItemsForUser(userId);
+  await UserModel.deleteOne({ _id: userId }).exec();
 }
 
 export interface RoleTransition {

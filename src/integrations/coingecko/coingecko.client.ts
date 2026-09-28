@@ -1,5 +1,7 @@
 import type { Logger } from 'pino';
 import { z } from 'zod';
+import { config } from '../../config/env.js';
+import { logger as defaultLogger } from '../../lib/logger.js';
 import { CoinGeckoError } from './coingecko.errors.js';
 import type {
   CoinGeckoClient,
@@ -8,6 +10,11 @@ import type {
   MarketCoin,
   SimplePrice,
 } from './coingecko.types.js';
+
+/**
+ * Cliente HTTP de CoinGecko (`createCoinGeckoClient`) y su variante perezosa
+ * (`createLazyCoinGeckoClient`, usada como default de `createApp(deps)`).
+ */
 
 export type SleepFn = (ms: number) => Promise<void>;
 
@@ -348,5 +355,42 @@ export function createCoinGeckoClient(deps: CreateCoinGeckoClientDeps): CoinGeck
     async getMarketChart(coingeckoId, days) {
       return fetchMarketChart(coingeckoId, days);
     },
+  };
+}
+
+/**
+ * Variante perezosa de {@link createCoinGeckoClient}: no construye el
+ * cliente real (ni lee `config.COINGECKO_API_KEY`) hasta que se invoca su
+ * primer método. Es el `coingecko` por defecto de `createApp(deps)` (tarea
+ * 1.2) — así construir la app en los tests que no ejercitan las rutas de
+ * administración de monedas ni el chequeo de disponibilidad `coingecko`
+ * nunca exige la variable de entorno, el mismo patrón que
+ * `createLazyFirebaseTokenVerifier()`. En un proceso real, `server.ts` ya
+ * llamó a `assertCoinGeckoApiKey()` antes de construir la app, así que para
+ * cuando este cliente perezoso se usa de verdad la clave siempre está
+ * presente.
+ */
+export function createLazyCoinGeckoClient(): CoinGeckoClient {
+  let real: CoinGeckoClient | undefined;
+
+  function resolve(): CoinGeckoClient {
+    if (!real) {
+      real = createCoinGeckoClient({
+        baseUrl: config.COINGECKO_BASE_URL,
+        apiKey: config.COINGECKO_API_KEY ?? '',
+        timeoutMs: config.COINGECKO_TIMEOUT_MS,
+        maxRetries: config.COINGECKO_MAX_RETRIES,
+        maxIdsPerCall: config.COINGECKO_MAX_IDS_PER_CALL,
+        logger: defaultLogger,
+      });
+    }
+    return real;
+  }
+
+  return {
+    getSimplePrices: (ids) => resolve().getSimplePrices(ids),
+    getMarkets: (ids) => resolve().getMarkets(ids),
+    ping: () => resolve().ping(),
+    getMarketChart: (coingeckoId, days) => resolve().getMarketChart(coingeckoId, days),
   };
 }
