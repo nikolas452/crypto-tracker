@@ -34,6 +34,22 @@ export interface JobRunStats {
   upstreamAttempts: number;
   /** Cantidad de monedas cuyo `coins.latest` fue actualizado por esta corrida. */
   latestUpdated: number;
+  // Fase 6 (alert-evaluation): estadísticas de la evaluación de alertas que
+  // corre al final de cada corrida de poll-prices (spec alert-evaluation).
+  alertsEvaluated: number;
+  alertsTriggered: number;
+  alertsRearmed: number;
+  alertsInCooldown: number;
+  triggerConflicts: number;
+  // Fase 9 (send-notifications-job): estadísticas del job de envío de
+  // notificaciones (ver `src/jobs/sendNotifications.ts`).
+  claimed: number;
+  sent: number;
+  retried: number;
+  failedPermanent: number;
+  failedExhausted: number;
+  cancelled: number;
+  recoveredStale: number;
 }
 
 export const EMPTY_JOB_RUN_STATS: Readonly<JobRunStats> = Object.freeze({
@@ -44,6 +60,18 @@ export const EMPTY_JOB_RUN_STATS: Readonly<JobRunStats> = Object.freeze({
   missingCoins: [],
   upstreamAttempts: 0,
   latestUpdated: 0,
+  alertsEvaluated: 0,
+  alertsTriggered: 0,
+  alertsRearmed: 0,
+  alertsInCooldown: 0,
+  triggerConflicts: 0,
+  claimed: 0,
+  sent: 0,
+  retried: 0,
+  failedPermanent: 0,
+  failedExhausted: 0,
+  cancelled: 0,
+  recoveredStale: 0,
 });
 
 export interface JobRunError {

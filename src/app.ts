@@ -22,6 +22,9 @@ import { createStatusRouter } from './modules/status/status.routes.js';
 import { createJobRunsRouter } from './modules/job-runs/job-runs.routes.js';
 import { createUsersRouter } from './modules/users/users.routes.js';
 import { createWatchlistRouter } from './modules/watchlist/watchlist.routes.js';
+import { createNotificationsRouter } from './modules/notifications/notifications.routes.js';
+import { createAdminNotificationsRouter } from './modules/notifications/notifications.admin.routes.js';
+import { createAlertsRouter } from './modules/alerts/alerts.routes.js';
 import {
   createMongoReadinessCheck,
   createCoinGeckoReadinessCheck,
@@ -34,6 +37,8 @@ import {
 } from './integrations/firebase/tokenVerifier.js';
 import { createLazyCoinGeckoClient } from './integrations/coingecko/coingecko.client.js';
 import type { CoinGeckoClient } from './integrations/coingecko/coingecko.types.js';
+import { createSmtpMailer } from './integrations/mailer/smtpMailer.js';
+import type { Mailer } from './integrations/mailer/mailer.types.js';
 
 export interface CreateAppDeps {
   /** Por defecto, la instancia compartida de pino de `src/lib/logger.ts`. */
@@ -73,6 +78,13 @@ export interface CreateAppDeps {
    */
   readonly watchlistConfig?: Pick<Config, 'WATCHLIST_MAX_ITEMS'>;
   /**
+   * Override exclusivo para tests del cap de alertas activas
+   * (`ALERTS_MAX_ACTIVE`, spec alert-store). Por defecto, el `config` real
+   * (20). Mismo motivo que `watchlistConfig`: permite ejercitar el cap con
+   * un valor pequeño sin sembrar decenas de alertas ni mutar `process.env`.
+   */
+  readonly alertsConfig?: Pick<Config, 'ALERTS_MAX_ACTIVE'>;
+  /**
    * Verificador de tokens de ID de Firebase (spec token-verification). Por
    * defecto, una implementación perezosa respaldada por Firebase Admin real
    * (`createLazyFirebaseTokenVerifier()`), que no toca `firebase-admin` hasta
@@ -95,6 +107,17 @@ export interface CreateAppDeps {
    * `assertCoinGeckoApiKey()` antes de construir la app.
    */
   readonly coingecko?: CoinGeckoClient;
+  /**
+   * Mailer (spec mailer / admin-notifications-api tarea 10.3), usado por
+   * `POST /api/v1/admin/notifications/test-email` para enviar un correo de
+   * prueba directo, sin pasar por el outbox. Por defecto,
+   * `createSmtpMailer()` — construye el transporte de nodemailer de forma
+   * síncrona sin abrir ninguna conexión real (nodemailer no conecta hasta
+   * `sendMail`/`verify`), mismo espíritu no bloqueante que el default de
+   * `coingecko`. Los tests inyectan `createFakeMailer(...)` acá, igual que
+   * inyectan `createFakeTokenVerifier(...)` en `tokenVerifier`.
+   */
+  readonly mailer?: Mailer;
 }
 
 /**
@@ -112,9 +135,10 @@ export interface CreateAppDeps {
  * monedas y la ruta de status, cada una precedida por su middleware
  * `Cache-Control`; `/me`, cada uno de cuyos verbos llama a `requireAuth` con
  * sus propias opciones y encadena el limitador de tasa por uid compartido;
- * `/me/watchlist`, precedida por `Cache-Control: private, no-cache`, con
- * `requireAuth()` y el mismo limitador por uid montados una sola vez dentro
- * del router; las rutas de admin precedidas por `Cache-Control: no-store` y protegidas
+ * `/me/watchlist` y `/me/notifications`, cada una precedida por
+ * `Cache-Control: private, no-cache`, con `requireAuth()` y el mismo
+ * limitador por uid montados una sola vez dentro de su propio router; las
+ * rutas de admin precedidas por `Cache-Control: no-store` y protegidas
  * por `requireAuth({ checkRevoked: true })` + el mismo limitador por uid +
  * `requireRole('admin')`) -> manejador 404 -> manejador de errores
  * centralizado.
@@ -123,6 +147,7 @@ export function createApp(deps: CreateAppDeps = {}): Express {
   const logger = deps.logger ?? defaultLogger;
   const tokenVerifier = deps.tokenVerifier ?? createLazyFirebaseTokenVerifier();
   const coingecko = deps.coingecko ?? createLazyCoinGeckoClient();
+  const mailer = deps.mailer ?? createSmtpMailer();
   // El chequeo `coingecko` solo se agrega cuando `COINGECKO_READINESS_ENABLED`
   // está habilitado (spec health-checks: "deshabilitado por defecto") — así
   // una caída de CoinGecko nunca saca a la API de rotación por sí sola.
@@ -181,6 +206,25 @@ export function createApp(deps: CreateAppDeps = {}): Express {
     createWatchlistRouter(userRateLimiter, deps.watchlistConfig ?? config),
   );
 
+  // `/me/notifications`: mismo patrón que `/me/watchlist` — Cache-Control:
+  // private, no-cache a nivel de router (spec notification-outbox) y
+  // requireAuth() + el mismo limitador por uid montados una sola vez dentro
+  // de notifications.routes.ts.
+  app.use(
+    '/api/v1/me/notifications',
+    cacheControlPrivateNoCache,
+    createNotificationsRouter(userRateLimiter),
+  );
+
+  // `/me/alerts`: mismo patrón que `/me/watchlist` — Cache-Control: private,
+  // no-cache a nivel de router (spec alert-api) y requireAuth() + el mismo
+  // limitador por uid montados una sola vez dentro de alerts.routes.ts.
+  app.use(
+    '/api/v1/me/alerts',
+    cacheControlPrivateNoCache,
+    createAlertsRouter(userRateLimiter, deps.alertsConfig ?? config),
+  );
+
   // requireAuth + requireRole reemplazan al retirado requireAdminKey (spec
   // role-authorization, auth-firebase tarea 6.2/6.3): se montan sobre el
   // propio prefijo `/api/v1/admin` (no solo sobre el router de job-runs) para
@@ -197,6 +241,9 @@ export function createApp(deps: CreateAppDeps = {}): Express {
   // RF-4.6: alta/reactivación/activación de monedas, validadas contra
   // CoinGecko con el cliente inyectado (deps.coingecko / tarea 1.2).
   app.use('/api/v1/admin/coins', createAdminCoinsRouter(coingecko));
+  // Spec admin-notifications-api: listado con diagnóstico completo, reintento
+  // atómico y email de prueba inmediato que bypassea el outbox.
+  app.use('/api/v1/admin/notifications', createAdminNotificationsRouter(mailer));
 
   if (deps.registerTestRoutes) {
     deps.registerTestRoutes(app);

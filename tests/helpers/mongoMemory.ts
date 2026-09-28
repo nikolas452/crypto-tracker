@@ -1,27 +1,33 @@
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 
 /**
  * Helper compartido para los tests de integración: levanta/detiene una
  * instancia de MongoDB en memoria y permite limpiar la base entre tests.
+ *
+ * Usa `MongoMemoryReplSet` con un único nodo (en lugar de la
+ * `MongoMemoryServer` standalone) porque, desde transactional-mongo, las
+ * transacciones (`withTransaction`) requieren un replica set — contra una
+ * instancia standalone, `commitTransaction` nunca persiste los cambios.
  */
 
-let mongod: MongoMemoryServer | undefined;
+let replSet: MongoMemoryReplSet | undefined;
 
-/** Levanta una instancia de MongoDB en memoria y conecta el singleton global de Mongoose a ella. */
+/** Levanta un replica set de un solo nodo en memoria y conecta el singleton global de Mongoose a él. */
 export async function startInMemoryMongo(): Promise<string> {
-  mongod = await MongoMemoryServer.create();
-  const uri = mongod.getUri();
+  replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
+  await replSet.waitUntilRunning();
+  const uri = replSet.getUri();
   await mongoose.connect(uri, { dbName: 'crypto_tracker_test' });
   return uri;
 }
 
-/** Desconecta Mongoose y apaga la instancia de MongoDB en memoria. */
+/** Desconecta Mongoose y apaga el replica set de MongoDB en memoria. */
 export async function stopInMemoryMongo(): Promise<void> {
   await mongoose.disconnect().catch(() => undefined);
-  if (mongod) {
-    await mongod.stop();
-    mongod = undefined;
+  if (replSet) {
+    await replSet.stop();
+    replSet = undefined;
   }
 }
 

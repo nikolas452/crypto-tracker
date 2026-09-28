@@ -17,10 +17,17 @@ import type { CoinListQuery, CoinSortField } from './coins.schemas.js';
  * scripts de mantenimiento.
  */
 
-/** El subconjunto de un documento de moneda que realmente necesita el job de polling. */
+/**
+ * El subconjunto de un documento de moneda que realmente necesita el job de
+ * polling. `name`/`symbol` se agregaron en la fase de alert-evaluation: el
+ * job de evaluación de alertas los necesita para el `payload` congelado de
+ * cada notificación, sin una consulta extra a `coins`.
+ */
 export interface ActiveCoin {
   readonly id: Types.ObjectId;
   readonly coingeckoId: string;
+  readonly name: string;
+  readonly symbol: string;
 }
 
 export interface MarketCoinUpsertInput {
@@ -77,6 +84,8 @@ export interface CoinsRepo {
 interface ActiveCoinProjection {
   _id: Types.ObjectId;
   coingeckoId: string;
+  name: string;
+  symbol: string;
 }
 
 /** Crea el repositorio de `coins` respaldado por Mongoose. Función factory simple, sin contenedor de DI. */
@@ -84,10 +93,15 @@ export function createCoinsRepo(): CoinsRepo {
   return {
     async findActive() {
       const docs = await CoinModel.find({ isActive: true })
-        .select({ coingeckoId: 1 })
+        .select({ coingeckoId: 1, name: 1, symbol: 1 })
         .lean<ActiveCoinProjection[]>()
         .exec();
-      return docs.map((doc) => ({ id: doc._id, coingeckoId: doc.coingeckoId }));
+      return docs.map((doc) => ({
+        id: doc._id,
+        coingeckoId: doc.coingeckoId,
+        name: doc.name,
+        symbol: doc.symbol,
+      }));
     },
 
     async upsertFromMarket(input) {
@@ -262,16 +276,27 @@ export async function countActiveCoins(): Promise<number> {
   return CoinModel.countDocuments({ isActive: true }).exec();
 }
 
+/** El subconjunto mínimo (id + coingeckoId) que necesita `findAllCoinIds()`, sin `name`/`symbol` — a diferencia de `ActiveCoin`, que el job de polling sí necesita para el payload de notificaciones. */
+export interface CoinIdRef {
+  readonly id: Types.ObjectId;
+  readonly coingeckoId: string;
+}
+
+interface CoinIdProjection {
+  _id: Types.ObjectId;
+  coingeckoId: string;
+}
+
 /**
  * Todas las monedas sin importar `isActive` — la fuente de datos del script
  * `coins:rebuild-latest` (spec data-maintenance-scripts: "para cada
  * moneda"), a diferencia de `findActive()` que el job de polling acota solo
  * a monedas activas.
  */
-export async function findAllCoinIds(): Promise<ActiveCoin[]> {
+export async function findAllCoinIds(): Promise<CoinIdRef[]> {
   const docs = await CoinModel.find({})
     .select({ coingeckoId: 1 })
-    .lean<ActiveCoinProjection[]>()
+    .lean<CoinIdProjection[]>()
     .exec();
   return docs.map((doc) => ({ id: doc._id, coingeckoId: doc.coingeckoId }));
 }
@@ -318,6 +343,32 @@ interface CoinRefProjection {
  */
 export async function findCoinRefByCoingeckoId(coingeckoId: string): Promise<CoinRef | null> {
   const doc = await CoinModel.findOne({ coingeckoId })
+    .select({ coingeckoId: 1, symbol: 1, name: 1, isActive: 1, latest: 1 })
+    .lean<CoinRefProjection | null>()
+    .exec();
+
+  return doc
+    ? {
+        id: doc._id,
+        coingeckoId: doc.coingeckoId,
+        symbol: doc.symbol,
+        name: doc.name,
+        isActive: doc.isActive,
+        latest: doc.latest,
+      }
+    : null;
+}
+
+/**
+ * Busca una moneda por su `_id` interno, con la misma proyección mínima que
+ * {@link findCoinRefByCoingeckoId} — usada por el módulo de alertas
+ * (spec alert-api) para resolver el `coingeckoId` de una alerta a partir de
+ * su `coinId` almacenado (`GET`/`PATCH /api/v1/me/alerts/:id`), donde el
+ * cliente nunca ve el ObjectId interno. Devuelve `null` cuando no existe
+ * ninguna moneda con ese id.
+ */
+export async function findCoinRefById(coinId: Types.ObjectId): Promise<CoinRef | null> {
+  const doc = await CoinModel.findOne({ _id: coinId })
     .select({ coingeckoId: 1, symbol: 1, name: 1, isActive: 1, latest: 1 })
     .lean<CoinRefProjection | null>()
     .exec();

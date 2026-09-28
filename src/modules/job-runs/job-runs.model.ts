@@ -46,6 +46,23 @@ const jobRunSchema = new Schema(
       missingCoins: { type: [String], required: true, default: [] },
       upstreamAttempts: { type: Number, required: true, default: 0 },
       latestUpdated: { type: Number, required: true, default: 0 },
+      // Fase 6 (alert-evaluation): estadísticas de la evaluación de alertas
+      // que corre al final de cada corrida de poll-prices.
+      alertsEvaluated: { type: Number, required: true, default: 0 },
+      alertsTriggered: { type: Number, required: true, default: 0 },
+      alertsRearmed: { type: Number, required: true, default: 0 },
+      alertsInCooldown: { type: Number, required: true, default: 0 },
+      triggerConflicts: { type: Number, required: true, default: 0 },
+      // Fase 9 (send-notifications-job): estadísticas del job de envío de
+      // notificaciones, que corre con su propio cron y guarda de
+      // solapamiento (ver `src/jobs/sendNotifications.ts` / `worker.ts`).
+      claimed: { type: Number, required: true, default: 0 },
+      sent: { type: Number, required: true, default: 0 },
+      retried: { type: Number, required: true, default: 0 },
+      failedPermanent: { type: Number, required: true, default: 0 },
+      failedExhausted: { type: Number, required: true, default: 0 },
+      cancelled: { type: Number, required: true, default: 0 },
+      recoveredStale: { type: Number, required: true, default: 0 },
     },
     // Solo { code, message } — nunca un stack trace ni un secreto.
     error: { type: jobRunErrorSchema, default: null },

@@ -2,6 +2,8 @@ import type { Types } from 'mongoose';
 import { config, type Config } from '../../config/env.js';
 import { logger as defaultLogger } from '../../lib/logger.js';
 import { maskEmail } from '../../lib/maskEmail.js';
+import { deleteAllAlertsForUser } from '../alerts/alerts.service.js';
+import { deleteAllNotificationsForUser } from '../notifications/notifications.service.js';
 import { deleteAllWatchlistItemsForUser } from '../watchlist/watchlist.service.js';
 import { UserModel, type UserRole } from './users.model.js';
 import type { VerifiedIdentity } from '../../integrations/firebase/tokenVerifier.js';
@@ -255,15 +257,20 @@ export async function updateDisplayName(
  * `deleteAllWatchlistItemsForUser` (la función de borrado del propio módulo
  * de watchlist) en lugar de hacer `WatchlistItemModel.deleteMany(...)`
  * directamente — así el módulo de usuarios nunca necesita conocer la forma
- * de una colección ajena, y una etapa futura (alertas, notificaciones)
- * extiende esta cascada agregando una llamada más, no conocimiento de otro
- * schema (design.md).
+ * de una colección ajena. La etapa alertas-email extendió esta cascada
+ * agregando dos llamadas más, en el orden que pide esa spec: primero el
+ * historial de notificaciones del usuario (excepto lo que esté `sending`,
+ * que un job de envío ya reclamó), después sus alertas, y recién ahí la
+ * watchlist — cada una sigue sin ser conocimiento de otro schema, solo una
+ * llamada más al método de borrado propio de ese módulo.
  *
  * Nunca toca la cuenta de Firebase — un request posterior con un token
  * todavía válido vuelve a aprovisionar un perfil vacío a través de
  * `resolveFromIdentity` (design.md, documentado también en el README).
  */
 export async function deleteAccount(userId: string): Promise<void> {
+  await deleteAllNotificationsForUser(userId);
+  await deleteAllAlertsForUser(userId);
   await deleteAllWatchlistItemsForUser(userId);
   await UserModel.deleteOne({ _id: userId }).exec();
 }

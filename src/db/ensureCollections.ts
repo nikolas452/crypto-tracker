@@ -1,8 +1,10 @@
 import mongoose from 'mongoose';
 import type { Logger } from 'pino';
 import { config, type Config } from '../config/env.js';
+import { AlertModel } from '../modules/alerts/alerts.model.js';
 import { CoinModel } from '../modules/coins/coins.model.js';
 import { JobRunModel } from '../modules/job-runs/job-runs.model.js';
+import { NotificationModel } from '../modules/notifications/notifications.model.js';
 import { UserModel } from '../modules/users/users.model.js';
 import { WatchlistItemModel } from '../modules/watchlist/watchlist.model.js';
 
@@ -116,12 +118,13 @@ async function ensurePriceSnapshotsCollection(
 }
 
 /**
- * `coins`, `job_runs`, `users` y `watchlist_items` son colecciones normales,
- * así que no hay riesgo de "forma incorrecta" — pero `connectDb()`
- * deshabilita el `autoIndex` de Mongoose en producción, así que sus índices
- * (incluidos el TTL de `job_runs` y el único compuesto de
- * `watchlist_items`) deben construirse explícitamente al arrancar, en lugar
- * de depender de la construcción en segundo plano de Mongoose al conectar.
+ * `coins`, `job_runs`, `users`, `watchlist_items`, `alerts` y `notifications`
+ * son colecciones normales, así que no hay riesgo de "forma incorrecta" —
+ * pero `connectDb()` deshabilita el `autoIndex` de Mongoose en producción,
+ * así que sus índices (incluidos los TTL de `job_runs`/`notifications` y los
+ * únicos de `watchlist_items`/`notifications`) deben construirse
+ * explícitamente al arrancar, en lugar de depender de la construcción en
+ * segundo plano de Mongoose al conectar.
  */
 async function ensureDomainIndexes(): Promise<void> {
   await Promise.all([
@@ -129,6 +132,8 @@ async function ensureDomainIndexes(): Promise<void> {
     JobRunModel.createIndexes(),
     UserModel.createIndexes(),
     WatchlistItemModel.createIndexes(),
+    AlertModel.createIndexes(),
+    NotificationModel.createIndexes(),
   ]);
 }
 

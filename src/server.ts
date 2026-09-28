@@ -3,6 +3,7 @@ import { assertCoinGeckoApiKey, assertFirebaseCredentials, config } from './conf
 import { logger } from './lib/logger.js';
 import { connectDb, disconnectDb } from './db/connect.js';
 import { ensureCollections } from './db/ensureCollections.js';
+import { verifyReplicaSet } from './lib/verifyReplicaSet.js';
 import { createApp } from './app.js';
 import { initializeFirebaseAdmin } from './integrations/firebase/admin.js';
 import { createFirebaseTokenVerifier } from './integrations/firebase/tokenVerifier.js';
@@ -25,6 +26,9 @@ async function main(): Promise<void> {
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
     isProduction: config.NODE_ENV === 'production',
   });
+  // Spec transactional-mongo: falla rápido si la conexión no soporta
+  // transacciones, antes de que nada más toque la base de datos.
+  await verifyReplicaSet(logger);
   await ensureCollections(logger);
 
   const firebaseApp = initializeFirebaseAdmin(config, logger);

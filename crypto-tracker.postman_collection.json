@@ -2,53 +2,109 @@
   "info": {
     "_postman_id": "b6f2a1a0-6e3e-4b1a-9e7a-4f2c8f1c9d10",
     "name": "Crypto Tracker API",
-    "description": "Stage 0 (base setup) + Stage 2 (api-rest) + Stage 3 (auth-firebase) + Stage 4 (watchlists) endpoints. Mirrors requests.http.\n\nRun `npm run dev` first. Stage 2 requests need a seeded catalog (`npm run seed:coins`) and at least one poll-prices run (`npm run job:poll-prices` or `npm run dev:worker`) for non-empty responses.\n\nStage 3 (auth): the old `X-Admin-Key` header is gone. Every authenticated request needs a Firebase ID token. The 'Auth (Firebase)' folder gets you one straight from Postman against the local Auth emulator (`firebase emulators:start --only auth`), no CLI script required:\n1. Run 'Sign up (create test user)' once per test account — it also stores the token in `idToken`.\n2. Call 'Me > Get my profile' once with that token to provision the Mongo profile.\n3. For admin requests, repeat steps 1-2 with the `adminEmail`/`adminPassword` variables to get `adminIdToken`, then run `npm run user:set-role -- --email {{adminEmail}} --role admin` from a terminal (Postman can create the Firebase account and provision the Mongo profile, but promoting to admin is a deliberate out-of-band step — see design.md).\n\nTo test against a real Firebase project instead of the emulator, change `authApiBaseUrl` to `https://identitytoolkit.googleapis.com/v1` and set `firebaseWebApiKey` to your project's real Web API Key (Firebase console -> Project settings -> General).\n\nStage 4 (watchlists): 'My Watchlist' needs `idToken` (see Stage 3) plus a seeded, active coin (`bitcoin` by default). 'Admin - Coins' needs `adminIdToken`. Each admin coin creation calls the real CoinGecko API once, so `COINGECKO_API_KEY` must be set on the server.",
+    "description": "Colección de la API de Crypto Tracker. Cubre endpoints públicos (Health, Coins, Price History, Price Stats, Status), endpoints de usuario autenticado (Me, My Watchlist, My Alerts, My Notifications) y endpoints de administrador (Admin - Job Runs, Admin - Coins, Admin - Notifications). Refleja los mismos casos que `requests.http`.\n\n**Orden general de uso:**\n1. Levantar el servidor con `npm run dev`.\n2. Para que Coins / Price History / Price Stats / Status devuelvan datos, sembrar el catálogo con `npm run seed:coins` y correr al menos un ciclo de `npm run job:poll-prices` (o dejar `npm run dev:worker` corriendo).\n3. Para cualquier endpoint autenticado, obtener un `idToken` desde la carpeta 'Auth (Firebase)' (ver esa carpeta para el detalle). No existe más el header `X-Admin-Key`: todo endpoint protegido exige un ID token de Firebase.\n4. Para los endpoints de Admin, además del `idToken`, hace falta un `adminIdToken` con el rol `admin` ya promovido en Mongo (ver carpeta 'Auth (Firebase)').\n5. Para 'My Alerts' y el envío real de mails, ver los requisitos adicionales en las carpetas 'My Alerts' y 'Admin - Notifications' (email verificado, Mailpit, variables SMTP).\n\nCada carpeta y cada request tienen su propia descripción con el detalle de qué necesitan antes de poder ejecutarse con éxito.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
-    { "key": "coingeckoId", "value": "bitcoin", "type": "string" },
-    { "key": "jobRunId", "value": "651f1c2e8b1e2a0012a3b456", "type": "string" },
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:3000",
+      "type": "string",
+      "description": "URL base del servidor de la API. No depende de nada, pero el servidor debe estar corriendo (npm run dev)."
+    },
+    {
+      "key": "coingeckoId",
+      "value": "bitcoin",
+      "type": "string",
+      "description": "Id de CoinGecko de la moneda usada en los ejemplos (detalle, historial, watchlist, alertas). Debe existir y estar activa en el catálogo (npm run seed:coins la incluye por defecto)."
+    },
+    {
+      "key": "jobRunId",
+      "value": "651f1c2e8b1e2a0012a3b456",
+      "type": "string",
+      "description": "Reemplazar con un _id real de la carpeta 'Admin - Job Runs > List job runs'."
+    },
+    {
+      "key": "alertId",
+      "value": "651f1c2e8b1e2a0012a3b789",
+      "type": "string",
+      "description": "Reemplazar con un _id real de alerta obtenido de un listado o una creación en 'My Alerts'."
+    },
+    {
+      "key": "notificationId",
+      "value": "651f1c2e8b1e2a0012a3b900",
+      "type": "string",
+      "description": "Reemplazar con un _id real de notificación obtenido de un listado en 'Admin - Notifications'."
+    },
     {
       "key": "authApiBaseUrl",
       "value": "http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1",
       "type": "string",
-      "description": "Local Auth emulator by default. For a real Firebase project use https://identitytoolkit.googleapis.com/v1."
+      "description": "Emulador local de Firebase Auth por defecto (requiere `firebase emulators:start --only auth`). Para probar contra un proyecto Firebase real, cambiar a https://identitytoolkit.googleapis.com/v1."
     },
     {
       "key": "firebaseWebApiKey",
       "value": "fake-api-key-for-emulator",
       "type": "string",
-      "description": "The emulator ignores this value (only checks it's present). Set your real Web API Key when authApiBaseUrl points at Google."
+      "description": "El emulador ignora este valor (solo verifica que esté presente). Configurar la Web API Key real cuando authApiBaseUrl apunte a Google."
     },
-    { "key": "testEmail", "value": "test@example.com", "type": "string" },
-    { "key": "testPassword", "value": "Password123!", "type": "string" },
+    {
+      "key": "testEmail",
+      "value": "test@example.com",
+      "type": "string",
+      "description": "Email de la cuenta de prueba usada en la carpeta 'Auth (Firebase)' para obtener idToken."
+    },
+    {
+      "key": "testPassword",
+      "value": "Password123!",
+      "type": "string",
+      "description": "Contraseña de la cuenta de prueba usada junto con testEmail."
+    },
     {
       "key": "idToken",
       "value": "",
       "type": "string",
-      "description": "Auto-filled by 'Auth (Firebase) > Sign up' / 'Sign in' below."
+      "description": "Se completa automáticamente al correr 'Auth (Firebase) > Sign up' o 'Sign in'. Lo necesita todo endpoint que requiera autenticación de usuario."
     },
-    { "key": "adminEmail", "value": "admin@example.com", "type": "string" },
-    { "key": "adminPassword", "value": "Password123!", "type": "string" },
+    {
+      "key": "adminEmail",
+      "value": "admin@example.com",
+      "type": "string",
+      "description": "Email de la cuenta admin usada en la carpeta 'Auth (Firebase)' para obtener adminIdToken."
+    },
+    {
+      "key": "adminPassword",
+      "value": "Password123!",
+      "type": "string",
+      "description": "Contraseña de la cuenta admin usada junto con adminEmail."
+    },
     {
       "key": "adminIdToken",
       "value": "",
       "type": "string",
-      "description": "Auto-filled by 'Auth (Firebase) > Sign up as admin' / 'Sign in as admin' below. Needs npm run user:set-role to actually carry the admin role in Mongo."
+      "description": "Se completa automáticamente al correr 'Auth (Firebase) > Sign up as admin' o 'Sign in as admin'. Necesita además que la cuenta tenga el rol admin en Mongo (npm run user:set-role) para que los endpoints de Admin acepten el token."
     }
   ],
   "item": [
     {
       "name": "Health",
+      "description": "Endpoints públicos de salud del servidor. No dependen de ninguna variable ni de ningún otro request: solo necesitan el servidor corriendo (npm run dev). Sirven para chequear que la API y la base de datos están disponibles.",
       "item": [
         {
           "name": "Liveness",
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
-            "description": "Never touches the database."
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Confirma que el proceso del servidor está vivo. No consulta la base de datos, así que responde aunque Mongo esté caído. No depende de ninguna variable ni de ningún otro request."
           }
         },
         {
@@ -58,19 +114,37 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/health/ready",
-              "host": ["{{baseUrl}}"],
-              "path": ["health", "ready"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health",
+                "ready"
+              ]
             },
-            "description": "Checks Mongo connectivity: 200 when up, 503 when down."
+            "description": "Verifica la conectividad con Mongo: responde 200 si la base está arriba y 503 si no. No depende de ninguna variable ni de ningún otro request."
           }
         },
         {
           "name": "Liveness with X-Request-Id",
           "request": {
             "method": "GET",
-            "header": [{ "key": "X-Request-Id", "value": "manual-test-123" }],
-            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
-            "description": "Request id is echoed back when supplied by the client."
+            "header": [
+              {
+                "key": "X-Request-Id",
+                "value": "manual-test-123"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Muestra que el header X-Request-Id, si el cliente lo manda, se devuelve tal cual en la respuesta (útil para trazabilidad). No depende de ninguna variable ni de ningún otro request."
           }
         },
         {
@@ -78,24 +152,49 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/no-existe", "host": ["{{baseUrl}}"], "path": ["no-existe"] },
-            "description": "404 NOT_FOUND with the global error format."
+            "url": {
+              "raw": "{{baseUrl}}/no-existe",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "no-existe"
+              ]
+            },
+            "description": "Prueba el manejo de rutas inexistentes: cualquier ruta no registrada devuelve 404 NOT_FOUND con el formato de error global de la API. No depende de ninguna variable ni de ningún otro request."
           }
         },
         {
           "name": "Malformed JSON body -> 400",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
-            "body": { "mode": "raw", "raw": "{\"invalid\": json}" },
-            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] },
-            "description": "400 VALIDATION_ERROR (\"JSON inválido\")."
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"invalid\": json}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Prueba el parseo del body: un JSON mal formado devuelve 400 VALIDATION_ERROR (\"JSON inválido\") antes de llegar al handler. No depende de ninguna variable ni de ningún otro request."
           }
         }
       ]
     },
     {
       "name": "Coins",
+      "description": "Catálogo público de monedas. Son endpoints sin autenticación, pero necesitan `npm run seed:coins` corrido antes para tener datos; sin eso devuelven listas vacías.",
       "item": [
         {
           "name": "List coins (default)",
@@ -104,10 +203,16 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins"
+              ]
             },
-            "description": "Default page/limit, sorted by market cap descending."
+            "description": "Lista el catálogo de monedas activas con paginación y orden por defecto (por capitalización de mercado, descendente). No requiere autenticación. Necesita el catálogo sembrado (npm run seed:coins)."
           }
         },
         {
@@ -117,15 +222,34 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins?page=1&limit=10&sort=change24h&order=asc",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins"
+              ],
               "query": [
-                { "key": "page", "value": "1" },
-                { "key": "limit", "value": "10" },
-                { "key": "sort", "value": "change24h" },
-                { "key": "order", "value": "asc" }
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                },
+                {
+                  "key": "sort",
+                  "value": "change24h"
+                },
+                {
+                  "key": "order",
+                  "value": "asc"
+                }
               ]
-            }
+            },
+            "description": "Igual que 'List coins (default)' pero mostrando el uso de paginación (page/limit) y orden explícito por otro campo (sort/order). No requiere autenticación. Necesita el catálogo sembrado (npm run seed:coins)."
           }
         },
         {
@@ -135,11 +259,22 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins?q=bit",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins"],
-              "query": [{ "key": "q", "value": "bit" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "bit"
+                }
+              ]
             },
-            "description": "Case-insensitive prefix match over symbol/name."
+            "description": "Busca monedas cuyo símbolo o nombre empiece con el texto dado (q), sin distinguir mayúsculas/minúsculas. No requiere autenticación. Necesita el catálogo sembrado (npm run seed:coins)."
           }
         },
         {
@@ -149,11 +284,22 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins?foo=1",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins"],
-              "query": [{ "key": "foo", "value": "1" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins"
+              ],
+              "query": [
+                {
+                  "key": "foo",
+                  "value": "1"
+                }
+              ]
             },
-            "description": "E2-4: unknown query param -> 400 VALIDATION_ERROR."
+            "description": "Prueba de error: un query param no reconocido (foo) devuelve 400 VALIDATION_ERROR, porque el schema de validación es estricto. No requiere autenticación."
           }
         },
         {
@@ -163,9 +309,17 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}"]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}"
+              ]
+            },
+            "description": "Devuelve el detalle de una moneda puntual por su id de CoinGecko. No requiere autenticación. Necesita `coingeckoId` sembrado y activo en el catálogo (npm run seed:coins)."
           }
         },
         {
@@ -175,15 +329,24 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/no-existe",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "no-existe"]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "no-existe"
+              ]
+            },
+            "description": "Prueba de error: pedir una moneda que no existe en el catálogo devuelve 404 NOT_FOUND. No requiere autenticación ni datos previos."
           }
         }
       ]
     },
     {
       "name": "Price History",
+      "description": "Historial de precios de una moneda, en crudo o agrupado en velas (candles). Públicos, sin autenticación. Necesitan `npm run seed:coins` y varias corridas de `npm run job:poll-prices` (o el worker corriendo un rato) para tener suficientes puntos en el rango pedido.",
       "item": [
         {
           "name": "History - raw (auto-selected)",
@@ -192,14 +355,28 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?from=2026-09-22T00:00:00Z&to=2026-09-22T06:00:00Z",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}",
+                "history"
+              ],
               "query": [
-                { "key": "from", "value": "2026-09-22T00:00:00Z" },
-                { "key": "to", "value": "2026-09-22T06:00:00Z" }
+                {
+                  "key": "from",
+                  "value": "2026-09-22T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-22T06:00:00Z"
+                }
               ]
             },
-            "description": "Short window -> interval auto-selected as \"raw\"."
+            "description": "Devuelve el historial de precios en crudo (un punto por muestra) para {{coingeckoId}} en el rango from/to. Como la ventana es corta, el servidor elige automáticamente interval=\"raw\". No requiere autenticación; necesita historial sembrado en ese rango."
           }
         },
         {
@@ -209,14 +386,32 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?interval=raw&from=2026-09-22T00:00:00Z&to=2026-09-22T06:00:00Z",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}",
+                "history"
+              ],
               "query": [
-                { "key": "interval", "value": "raw" },
-                { "key": "from", "value": "2026-09-22T00:00:00Z" },
-                { "key": "to", "value": "2026-09-22T06:00:00Z" }
+                {
+                  "key": "interval",
+                  "value": "raw"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-09-22T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-22T06:00:00Z"
+                }
               ]
-            }
+            },
+            "description": "Igual que el anterior, pero pasando interval=raw de forma explícita en vez de dejar que el servidor lo infiera. No requiere autenticación; necesita historial sembrado en ese rango."
           }
         },
         {
@@ -226,16 +421,36 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?interval=1h&from=2026-09-16T00:00:00Z&to=2026-09-23T00:00:00Z&sma=3",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}",
+                "history"
+              ],
               "query": [
-                { "key": "interval", "value": "1h" },
-                { "key": "from", "value": "2026-09-16T00:00:00Z" },
-                { "key": "to", "value": "2026-09-23T00:00:00Z" },
-                { "key": "sma", "value": "3" }
+                {
+                  "key": "interval",
+                  "value": "1h"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-09-16T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-23T00:00:00Z"
+                },
+                {
+                  "key": "sma",
+                  "value": "3"
+                }
               ]
             },
-            "description": "OHLC candles over 7 days, with a 3-bucket simple moving average."
+            "description": "Devuelve velas OHLC agrupadas por hora a lo largo de 7 días, con una media móvil simple de 3 velas (sma=3). No requiere autenticación; necesita historial sembrado en ese rango."
           }
         },
         {
@@ -245,14 +460,32 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?interval=1d&from=2026-06-25T00:00:00Z&to=2026-09-23T00:00:00Z",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}",
+                "history"
+              ],
               "query": [
-                { "key": "interval", "value": "1d" },
-                { "key": "from", "value": "2026-06-25T00:00:00Z" },
-                { "key": "to", "value": "2026-09-23T00:00:00Z" }
+                {
+                  "key": "interval",
+                  "value": "1d"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-06-25T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-23T00:00:00Z"
+                }
               ]
-            }
+            },
+            "description": "Devuelve velas OHLC agrupadas por día a lo largo de 90 días. No requiere autenticación; necesita historial sembrado en ese rango (útil para probar rangos largos)."
           }
         },
         {
@@ -262,21 +495,39 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/history?interval=raw&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}", "history"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}",
+                "history"
+              ],
               "query": [
-                { "key": "interval", "value": "raw" },
-                { "key": "from", "value": "2026-09-01T00:00:00Z" },
-                { "key": "to", "value": "2026-09-23T00:00:00Z" }
+                {
+                  "key": "interval",
+                  "value": "raw"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-09-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-23T00:00:00Z"
+                }
               ]
             },
-            "description": "E2-8: raw over a range exceeding the 7-day cap -> 400 suggesting interval=1h."
+            "description": "Prueba de error: pedir interval=raw sobre un rango mayor a 7 días supera el límite y devuelve 400, sugiriendo usar interval=1h. No requiere autenticación."
           }
         }
       ]
     },
     {
       "name": "Price Stats",
+      "description": "Estadísticas agregadas de precio (mín, máx, promedio, etc.) para una moneda en distintos rangos. Públicos, sin autenticación. Necesitan `npm run seed:coins` y suficiente historial sembrado (npm run job:poll-prices) para el rango pedido.",
       "item": [
         {
           "name": "Stats - default range (24h)",
@@ -285,9 +536,18 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/stats",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}", "stats"]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}",
+                "stats"
+              ]
+            },
+            "description": "Devuelve las estadísticas de precio de {{coingeckoId}} con el rango por defecto (24h). No requiere autenticación; necesita historial sembrado de las últimas 24h."
           }
         },
         {
@@ -297,10 +557,24 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/stats?range=7d",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}", "stats"],
-              "query": [{ "key": "range", "value": "7d" }]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}",
+                "stats"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "7d"
+                }
+              ]
+            },
+            "description": "Igual que 'Stats - default range' pero pidiendo el rango de 7 días explícitamente (range=7d). No requiere autenticación; necesita historial sembrado de los últimos 7 días."
           }
         },
         {
@@ -310,17 +584,31 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/coins/{{coingeckoId}}/stats?range=90d",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "coins", "{{coingeckoId}}", "stats"],
-              "query": [{ "key": "range", "value": "90d" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "coins",
+                "{{coingeckoId}}",
+                "stats"
+              ],
+              "query": [
+                {
+                  "key": "range",
+                  "value": "90d"
+                }
+              ]
             },
-            "description": "RNF-2.1 sets a p95 < 200ms budget for this range."
+            "description": "Igual que los anteriores pero con range=90d, el rango más pesado (el requisito de performance del proyecto exige p95 < 200ms para este caso). No requiere autenticación; necesita historial sembrado de los últimos 90 días."
           }
         }
       ]
     },
     {
       "name": "Status",
+      "description": "Estado público del worker de background jobs. No requiere autenticación ni depende de otras carpetas.",
       "item": [
         {
           "name": "Worker status",
@@ -329,16 +617,23 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/status",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "status"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "status"
+              ]
             },
-            "description": "Public worker-health summary - no token required."
+            "description": "Devuelve un resumen del estado de salud del worker (último poll-prices, últimas notificaciones, etc.). No requiere token; solo hace falta que el servidor esté corriendo."
           }
         }
       ]
     },
     {
       "name": "Auth (Firebase)",
+      "description": "Punto de entrada obligatorio antes de usar cualquier endpoint autenticado: acá se consiguen `idToken` y `adminIdToken`. Llama directo a la API REST de Firebase Identity Toolkit (no a nuestro backend), así que requiere el emulador de Auth corriendo (`firebase emulators:start --only auth`) o, si se apunta a un proyecto real, `authApiBaseUrl`/`firebaseWebApiKey` configurados. Orden recomendado: 1) 'Sign up (create test user)' una vez por cuenta (falla con EMAIL_EXISTS la segunda vez; en ese caso usar 'Sign in'). 2) Llamar 'Me > Get my profile' una vez con ese token para crear el perfil en Mongo. 3) Para un admin, repetir 1-2 con adminEmail/adminPassword ('Sign up as admin' / 'Sign in as admin') y después correr `npm run user:set-role -- --email {{adminEmail}} --role admin` desde una terminal, porque promover a admin es un paso deliberado fuera de la API.",
       "item": [
         {
           "name": "Sign up (create test user)",
@@ -361,18 +656,32 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"returnSecureToken\": true\n}"
             },
             "url": {
               "raw": "{{authApiBaseUrl}}/accounts:signUp?key={{firebaseWebApiKey}}",
-              "host": ["{{authApiBaseUrl}}"],
-              "path": ["accounts:signUp"],
-              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+              "host": [
+                "{{authApiBaseUrl}}"
+              ],
+              "path": [
+                "accounts:signUp"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "{{firebaseWebApiKey}}"
+                }
+              ]
             },
-            "description": "Calls Firebase's Identity Toolkit REST API directly (the same one `npm run auth:create-test-user` and `npm run auth:token` use) — no CLI needed. Run once per email: a second run fails with EMAIL_EXISTS, use 'Sign in' instead. Saves the ID token into the `idToken` collection variable. Equivalent script: `npm run auth:create-test-user -- --email {{testEmail}} --password {{testPassword}}`."
+            "description": "Crea la cuenta de prueba en Firebase Auth y guarda el ID token en la variable `idToken` (vía el test script). Llama directo a la REST API de Identity Toolkit (lo mismo que hacen `npm run auth:create-test-user` y `npm run auth:token`), no hace falta CLI. Depende de testEmail/testPassword/authApiBaseUrl/firebaseWebApiKey. Correr una sola vez por email: la segunda vez falla con EMAIL_EXISTS, ahí usar 'Sign in' en su lugar. Equivalente por consola: `npm run auth:create-test-user -- --email {{testEmail}} --password {{testPassword}}`."
           }
         },
         {
@@ -396,18 +705,32 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{testEmail}}\",\n  \"password\": \"{{testPassword}}\",\n  \"returnSecureToken\": true\n}"
             },
             "url": {
               "raw": "{{authApiBaseUrl}}/accounts:signInWithPassword?key={{firebaseWebApiKey}}",
-              "host": ["{{authApiBaseUrl}}"],
-              "path": ["accounts:signInWithPassword"],
-              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+              "host": [
+                "{{authApiBaseUrl}}"
+              ],
+              "path": [
+                "accounts:signInWithPassword"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "{{firebaseWebApiKey}}"
+                }
+              ]
             },
-            "description": "Use once the account already exists. Saves the ID token into `idToken`. Equivalent script: `npm run auth:token -- --email {{testEmail}} --password {{testPassword}}`. ID tokens expire after 1 hour - rerun this to refresh `idToken`."
+            "description": "Inicia sesión con una cuenta que ya existe en Firebase (creada antes con 'Sign up') y guarda el ID token en `idToken`. Depende de testEmail/testPassword y de que la cuenta ya exista. Equivalente por consola: `npm run auth:token -- --email {{testEmail}} --password {{testPassword}}`. Los ID tokens expiran a la hora: volver a correr esto para refrescar `idToken`."
           }
         },
         {
@@ -427,18 +750,32 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\",\n  \"returnSecureToken\": true\n}"
             },
             "url": {
               "raw": "{{authApiBaseUrl}}/accounts:signUp?key={{firebaseWebApiKey}}",
-              "host": ["{{authApiBaseUrl}}"],
-              "path": ["accounts:signUp"],
-              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+              "host": [
+                "{{authApiBaseUrl}}"
+              ],
+              "path": [
+                "accounts:signUp"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "{{firebaseWebApiKey}}"
+                }
+              ]
             },
-            "description": "Creates the Firebase account for the future admin and saves its token into `adminIdToken`. This alone does NOT grant the admin role — it only exists in Firebase, not yet in Mongo. Next: call 'Me > Get my profile' with `adminIdToken` once to provision it, then from a terminal run `npm run user:set-role -- --email {{adminEmail}} --role admin` (or skip both steps with `npm run auth:create-test-user -- --email {{adminEmail}} --password {{adminPassword}} --admin`, then just use 'Sign in as admin' below to get the token)."
+            "description": "Crea en Firebase la cuenta de la futura admin y guarda su token en `adminIdToken`. Esto solo NO otorga el rol admin: la cuenta existe en Firebase pero todavía no en Mongo. Depende de adminEmail/adminPassword. Pasos siguientes: llamar 'Me > Get my profile' una vez con `adminIdToken` para crear el perfil en Mongo, y después desde una terminal correr `npm run user:set-role -- --email {{adminEmail}} --role admin` (o saltarse ambos pasos con `npm run auth:create-test-user -- --email {{adminEmail}} --password {{adminPassword}} --admin` y usar directamente 'Sign in as admin' de abajo para obtener el token)."
           }
         },
         {
@@ -458,41 +795,81 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{adminEmail}}\",\n  \"password\": \"{{adminPassword}}\",\n  \"returnSecureToken\": true\n}"
             },
             "url": {
               "raw": "{{authApiBaseUrl}}/accounts:signInWithPassword?key={{firebaseWebApiKey}}",
-              "host": ["{{authApiBaseUrl}}"],
-              "path": ["accounts:signInWithPassword"],
-              "query": [{ "key": "key", "value": "{{firebaseWebApiKey}}" }]
+              "host": [
+                "{{authApiBaseUrl}}"
+              ],
+              "path": [
+                "accounts:signInWithPassword"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "{{firebaseWebApiKey}}"
+                }
+              ]
             },
-            "description": "Refreshes `adminIdToken` once the admin account exists in Firebase and already has role=admin in Mongo (see 'Sign up as admin')."
+            "description": "Refresca `adminIdToken` una vez que la cuenta admin ya existe en Firebase y ya tiene role=admin en Mongo (ver 'Sign up as admin'). Depende de adminEmail/adminPassword."
           }
         }
       ]
     },
     {
       "name": "Me",
+      "description": "Perfil del usuario autenticado. Todos los requests (salvo el de prueba sin token) necesitan `idToken` obtenido antes en la carpeta 'Auth (Firebase)'.",
       "item": [
         {
           "name": "Get my profile - no token -> 401",
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
-            "description": "401 UNAUTHENTICATED - no Authorization header."
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me"
+              ]
+            },
+            "description": "Prueba de error: pedir el perfil sin header Authorization devuelve 401 UNAUTHENTICATED. No depende de ninguna variable."
           }
         },
         {
           "name": "Get my profile",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
-            "description": "E3-4: first call with a valid token for an unknown uid just-in-time provisions the Mongo profile and returns { data: { id, email, emailVerified, displayName, role, createdAt } }. Run 'Auth (Firebase) > Sign up' or 'Sign in' first to get `idToken`."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me"
+              ]
+            },
+            "description": "Devuelve el perfil del usuario autenticado. La primera vez que se llama con un token válido cuyo uid todavía no tiene perfil, lo crea al vuelo en Mongo y devuelve { data: { id, email, emailVerified, displayName, role, createdAt } }. Depende de `idToken`: correr antes 'Auth (Firebase) > Sign up' o 'Sign in' para obtenerlo."
           }
         },
         {
@@ -500,12 +877,31 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"displayName\": \"Nico\"\n}" },
-            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
-            "description": "E3-8: the only editable field. `displayName: null` clears it."
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Nico\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me"
+              ]
+            },
+            "description": "Actualiza el nombre visible del usuario; es el único campo editable de este endpoint. Mandar `displayName: null` lo limpia. Depende de `idToken` (ver carpeta 'Auth (Firebase)')."
           }
         },
         {
@@ -513,12 +909,31 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{}" },
-            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
-            "description": "400 VALIDATION_ERROR - at least one field is required, and displayName is the only one that exists."
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me"
+              ]
+            },
+            "description": "Prueba de error: mandar un body vacío devuelve 400 VALIDATION_ERROR, porque se exige al menos un campo y displayName es el único que existe. Depende de `idToken`."
           }
         },
         {
@@ -526,27 +941,62 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"role\": \"admin\"\n}" },
-            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
-            "description": "E3-8: 400 VALIDATION_ERROR - the schema is .strict(), role is not an accepted field. Privilege escalation via PATCH /me is impossible by design (design.md)."
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"admin\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me"
+              ]
+            },
+            "description": "Prueba de error: intentar cambiar el rol propio devuelve 400 VALIDATION_ERROR, porque el schema es estricto y role no es un campo aceptado acá. La escalada de privilegios vía PATCH /me es imposible por diseño (ver design.md). Depende de `idToken`."
           }
         },
         {
           "name": "Delete my account",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
-            "url": { "raw": "{{baseUrl}}/api/v1/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "me"] },
-            "description": "E3-11: 204, deletes the Mongo document only. Uses checkRevoked: true (destructive operation). The Firebase account itself is untouched - calling 'Get my profile' again with the same (still-valid) token re-provisions a brand-new empty profile. See README."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me"
+              ]
+            },
+            "description": "Elimina la cuenta del usuario autenticado: 204, borra solo el documento en Mongo (usa checkRevoked: true por ser una operación destructiva). La cuenta de Firebase queda intacta - volver a llamar 'Get my profile' con el mismo token (todavía válido) crea de nuevo un perfil vacío. Ver README. Depende de `idToken`."
           }
         }
       ]
     },
     {
       "name": "My Watchlist",
+      "description": "Lista de monedas que sigue el usuario autenticado. Todos los requests (salvo el de prueba sin token) necesitan `idToken` (carpeta 'Auth (Firebase)'). Los que agregan una moneda necesitan además que esa moneda exista y esté activa en el catálogo (npm run seed:coins; `bitcoin` viene sembrada por defecto).",
       "item": [
         {
           "name": "List my watchlist - no token -> 401",
@@ -555,54 +1005,108 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist"
+              ]
             },
-            "description": "401 UNAUTHENTICATED - no Authorization header."
+            "description": "Prueba de error: pedir la watchlist sin header Authorization devuelve 401 UNAUTHENTICATED. No depende de ninguna variable."
           }
         },
         {
           "name": "List my watchlist",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist"
+              ]
             },
-            "description": "Default sort: addedAt desc. Returns { data, meta: { count, max } }, no userId/_id leaked (RNF-4.3)."
+            "description": "Lista las monedas seguidas por el usuario autenticado, orden por defecto addedAt descendente. Devuelve { data, meta: { count, max } }, sin exponer userId/_id por seguridad. Depende de `idToken`."
           }
         },
         {
           "name": "List my watchlist - sorted by 24h change",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist?sort=change24h&order=desc",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist"
+              ],
               "query": [
-                { "key": "sort", "value": "change24h" },
-                { "key": "order", "value": "desc" }
+                {
+                  "key": "sort",
+                  "value": "change24h"
+                },
+                {
+                  "key": "order",
+                  "value": "desc"
+                }
               ]
             },
-            "description": "E4-13: sort=change24h&order=desc orders by latest.change24hPct descending."
+            "description": "Igual que 'List my watchlist' pero ordenando por variación de 24h descendente (sort=change24h&order=desc). Depende de `idToken` y de tener al menos una moneda seguida (ver 'Add a coin')."
           }
         },
         {
           "name": "List my watchlist - unknown query param -> 400",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist?page=1",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist"],
-              "query": [{ "key": "page", "value": "1" }]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
             },
-            "description": "No pagination accepted here - the list is bounded by WATCHLIST_MAX_ITEMS instead."
+            "description": "Prueba de error: este endpoint no acepta paginación (la lista está acotada por WATCHLIST_MAX_ITEMS en su lugar), así que page=1 devuelve 400 VALIDATION_ERROR. Depende de `idToken`."
           }
         },
         {
@@ -610,16 +1114,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"bitcoin\",\n  \"note\": \"largo plazo\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"bitcoin\",\n  \"note\": \"largo plazo\"\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist"
+              ]
             },
-            "description": "201 with the item in listing shape + Location: /api/v1/me/watchlist/bitcoin. Requires bitcoin to exist and be active (seeded by default - see npm run seed:coins)."
+            "description": "Agrega una moneda a la watchlist del usuario: 201 con el item en el mismo formato del listado + header Location: /api/v1/me/watchlist/bitcoin. Depende de `idToken` y de que la moneda (bitcoin en el ejemplo) exista y esté activa en el catálogo (sembrada por defecto con npm run seed:coins)."
           }
         },
         {
@@ -627,16 +1147,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"bitcoin\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"bitcoin\"\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist"
+              ]
             },
-            "description": "E4-2: duplicate {userId, coinId} pair -> 409 CONFLICT (translated from the unique index's E11000)."
+            "description": "Prueba de error: agregar de nuevo una moneda ya seguida (mismo par userId/coinId) devuelve 409 CONFLICT (traducido del E11000 del índice único de Mongo). Depende de `idToken` y de haber corrido antes 'Add a coin' con la misma moneda."
           }
         },
         {
@@ -644,16 +1180,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"no-existe\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"no-existe\"\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist"
+              ]
             },
-            "description": "E4-3: coin not in the catalog, or inactive -> 404 NOT_FOUND."
+            "description": "Prueba de error: intentar seguir una moneda que no está en el catálogo o está inactiva devuelve 404 NOT_FOUND. Depende de `idToken`."
           }
         },
         {
@@ -661,8 +1213,14 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
             "body": {
               "mode": "raw",
@@ -670,10 +1228,17 @@
             },
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist"
+              ]
             },
-            "description": "RF-4.5: the body schema is .strict() - userId is never read from the client, only from the token. 400 VALIDATION_ERROR."
+            "description": "Prueba de error: el schema del body es estricto - userId nunca se lee del cliente, solo sale del token. Mandarlo igual devuelve 400 VALIDATION_ERROR. Depende de `idToken`."
           }
         },
         {
@@ -681,16 +1246,33 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"note\": \"actualizado\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"actualizado\"\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist/Bitcoin",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist", "Bitcoin"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist",
+                "Bitcoin"
+              ]
             },
-            "description": "The coingeckoId path segment is normalized to lowercase before lookup, so a mixed-case id still resolves."
+            "description": "Actualiza la nota (note) de una moneda seguida. El segmento coingeckoId de la URL se normaliza a minúsculas antes de buscar, así que un id con mayúsculas igual resuelve. Depende de `idToken` y de haber seguido antes esa moneda (ver 'Add a coin')."
           }
         },
         {
@@ -698,48 +1280,678 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"note\": \"no la sigo\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"no la sigo\"\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist/ethereum",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist", "ethereum"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist",
+                "ethereum"
+              ]
             },
-            "description": "E4-7: patching a coin you don't follow -> 404 NOT_FOUND."
+            "description": "Prueba de error: actualizar la nota de una moneda que no seguís devuelve 404 NOT_FOUND. Depende de `idToken`."
           }
         },
         {
           "name": "Remove a coin",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist/bitcoin",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist", "bitcoin"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist",
+                "bitcoin"
+              ]
             },
-            "description": "E4-6: always 204, even if it was never followed (idempotent delete)."
+            "description": "Deja de seguir una moneda: siempre devuelve 204, incluso si nunca se siguió (delete idempotente). Depende de `idToken`."
           }
         },
         {
           "name": "Remove a coin - malformed id -> 400",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/me/watchlist/Not_Valid!",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "me", "watchlist", "Not_Valid!"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "watchlist",
+                "Not_Valid!"
+              ]
             },
-            "description": "The only case DELETE ever returns 400: the coingeckoId itself fails pattern validation."
+            "description": "Prueba de error: el único caso en que este DELETE devuelve 400 es cuando el coingeckoId en sí no cumple el patrón de validación. Depende de `idToken`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "My Alerts",
+      "description": "Alertas de precio del usuario autenticado (crear, listar, editar, borrar). Todos los requests (salvo el de prueba sin token) necesitan `idToken`. Crear una alerta además exige que el usuario tenga el email verificado (emailVerified: true en Firebase) y que la moneda de `coingeckoId` exista y esté activa. Crear una alerta nunca envía mail por sí sola: recién se dispara cuando corre 'poll-prices' y la evalúa, y se entrega cuando corre 'send-notifications' (ver src/jobs).",
+      "item": [
+        {
+          "name": "List my alerts - no token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ]
+            },
+            "description": "Prueba de error: pedir las alertas sin header Authorization devuelve 401 UNAUTHENTICATED. No depende de ninguna variable."
+          }
+        },
+        {
+          "name": "List my alerts (default: all statuses, createdAt desc)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ]
+            },
+            "description": "Lista todas las alertas del usuario autenticado, sin filtrar, ordenadas por fecha de creación descendente. Depende de `idToken`."
+          }
+        },
+        {
+          "name": "List my alerts - filtered by status and coin",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts?status=armed,triggered&coingeckoId={{coingeckoId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "armed,triggered"
+                },
+                {
+                  "key": "coingeckoId",
+                  "value": "{{coingeckoId}}"
+                }
+              ]
+            },
+            "description": "Igual que el listado por defecto, pero filtrando por status (armed,triggered) y por moneda (coingeckoId). Depende de `idToken`."
+          }
+        },
+        {
+          "name": "Create a PRICE_BELOW alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"{{coingeckoId}}\",\n  \"type\": \"PRICE_BELOW\",\n  \"threshold\": 70000,\n  \"note\": \"largo plazo\"\n}"
+            },
+            "description": "Crea una alerta que se dispara cuando el precio de la moneda baja del threshold: 201 + header Location; meta informa el valor actual de la moneda y si la condición ya se cumple. Depende de `idToken` con email verificado, y de que {{coingeckoId}} exista y esté activa."
+          }
+        },
+        {
+          "name": "Create a CHANGE_24H_ABS_GTE alert",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"{{coingeckoId}}\",\n  \"type\": \"CHANGE_24H_ABS_GTE\",\n  \"threshold\": 5,\n  \"cooldownMinutes\": 30\n}"
+            },
+            "description": "Crea una alerta que se dispara cuando la variación absoluta de 24h supera el threshold (este tipo tiene su propio rango válido de threshold: 0.1-100) y respeta un cooldown en minutos entre disparos. Depende de `idToken` con email verificado, y de que {{coingeckoId}} exista y esté activa."
+          }
+        },
+        {
+          "name": "Create an alert - threshold out of range -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"{{coingeckoId}}\",\n  \"type\": \"CHANGE_24H_ABS_GTE\",\n  \"threshold\": 150\n}"
+            },
+            "description": "Prueba de error: CHANGE_24H_ABS_GTE solo acepta threshold entre 0.1 y 100, así que 150 devuelve 400 VALIDATION_ERROR. Depende de `idToken` con email verificado."
+          }
+        },
+        {
+          "name": "Create an alert - unverified email -> 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"{{coingeckoId}}\",\n  \"type\": \"PRICE_ABOVE\",\n  \"threshold\": 80000\n}"
+            },
+            "description": "Prueba de error: crear una alerta con un usuario cuyo emailVerified es false devuelve 422 UNPROCESSABLE / EMAIL_NOT_VERIFIED. Depende de `idToken` de una cuenta sin verificar."
+          }
+        },
+        {
+          "name": "Create an alert - unknown coin -> 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"no-existe\",\n  \"type\": \"PRICE_ABOVE\",\n  \"threshold\": 80000\n}"
+            },
+            "description": "Prueba de error: crear una alerta sobre una moneda que no existe (o está inactiva) devuelve 404 NOT_FOUND. Depende de `idToken` con email verificado."
+          }
+        },
+        {
+          "name": "Create an alert - active cap reached -> 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"ethereum\",\n  \"type\": \"PRICE_ABOVE\",\n  \"threshold\": 5000\n}"
+            },
+            "description": "Prueba de error: si el usuario ya tiene ALERTS_MAX_ACTIVE alertas en estado armed/triggered, crear una más devuelve 422 UNPROCESSABLE / LIMIT_REACHED. Depende de `idToken` con email verificado y de haber llegado antes al límite de alertas activas."
+          }
+        },
+        {
+          "name": "Alert detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts/{{alertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts",
+                "{{alertId}}"
+              ]
+            },
+            "description": "Devuelve el detalle de una alerta puntual del usuario autenticado. Depende de `idToken` y de `alertId`: reemplazar {{alertId}} con un _id real de un listado o de una respuesta de creación de esta misma carpeta."
+          }
+        },
+        {
+          "name": "Alert detail - malformed id -> 400",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts/not-an-object-id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts",
+                "not-an-object-id"
+              ]
+            },
+            "description": "Prueba de error: pasar un id que no es un ObjectId válido de Mongo devuelve 400 VALIDATION_ERROR. Depende de `idToken`."
+          }
+        },
+        {
+          "name": "Alert detail - another user's alert -> 404",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts/651f1c2e8b1e2a0012a3b000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts",
+                "651f1c2e8b1e2a0012a3b000"
+              ]
+            },
+            "description": "Prueba de error: pedir una alerta de otro usuario (o un id inexistente) siempre devuelve 404, nunca 403 - la respuesta nunca revela si el recurso existe. Depende de `idToken`."
+          }
+        },
+        {
+          "name": "Disable an alert",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts/{{alertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts",
+                "{{alertId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Deshabilita una alerta (status -> disabled, sea cual sea su estado anterior). Depende de `idToken` y de `alertId` (un _id real de esta carpeta)."
+          }
+        },
+        {
+          "name": "Re-enable an alert",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts/{{alertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts",
+                "{{alertId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}"
+            },
+            "description": "Vuelve a habilitar una alerta deshabilitada (status -> armed); si el usuario ya está en ALERTS_MAX_ACTIVE devuelve 422 UNPROCESSABLE / LIMIT_REACHED. Depende de `idToken` y de `alertId` de una alerta deshabilitada."
+          }
+        },
+        {
+          "name": "Change threshold (re-arms if triggered)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts/{{alertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts",
+                "{{alertId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"threshold\": 65000\n}"
+            },
+            "description": "Cambia el threshold de la alerta; si estaba en triggered, esto la vuelve a armar (status -> armed) sin resetear lastTriggeredAt/triggerCount. Depende de `idToken` y de `alertId`."
+          }
+        },
+        {
+          "name": "Patch with type -> 400 (type is immutable)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts/{{alertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts",
+                "{{alertId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"PRICE_ABOVE\"\n}"
+            },
+            "description": "Prueba de error: type no forma parte del schema de PATCH (es inmutable), así que se rechaza igual que cualquier campo desconocido (400 VALIDATION_ERROR). Depende de `idToken` y de `alertId`."
+          }
+        },
+        {
+          "name": "Delete an alert",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/alerts/{{alertId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "alerts",
+                "{{alertId}}"
+              ]
+            },
+            "description": "Borra una alerta: siempre 204, incluso si no existe o pertenece a otro usuario. Cualquier notificación pendiente asociada pasa a cancelled. Depende de `idToken` y de `alertId`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "My Notifications",
+      "description": "Historial de notificaciones (mails) generados por las alertas del usuario autenticado. Todos los requests necesitan `idToken`. Solo va a haber datos acá después de que 'poll-prices' dispare alguna alerta y 'send-notifications' la procese.",
+      "item": [
+        {
+          "name": "List my notification history",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "notifications"
+              ]
+            },
+            "description": "Lista el historial de notificaciones del usuario, con el destinatario (`to`) enmascarado y solo `lastError.code` expuesto (nunca lockedBy/dedupeKey ni el mensaje de error completo). Depende de `idToken`."
+          }
+        },
+        {
+          "name": "List my notifications - filtered by status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/notifications?status=failed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "notifications"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "failed"
+                }
+              ]
+            },
+            "description": "Igual que el listado anterior, filtrando solo las notificaciones en estado failed. Depende de `idToken`."
           }
         }
       ]
     },
     {
       "name": "Admin - Job Runs",
+      "description": "Historial de corridas de jobs de background (poll-prices, alert-evaluation, send-notifications, etc.), solo para administradores. Necesita `adminIdToken` de una cuenta con role=admin ya promovido en Mongo (ver carpeta 'Auth (Firebase)' y npm run user:set-role). Ya no existe el header X-Admin-Key.",
       "item": [
         {
           "name": "List job runs - no token -> 401",
@@ -748,143 +1960,288 @@
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "job-runs"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "job-runs"
+              ]
             },
-            "description": "401 UNAUTHENTICATED - requireAuth runs before requireRole."
+            "description": "Prueba de error: pedir el listado sin header Authorization devuelve 401 UNAUTHENTICATED - el middleware requireAuth corre antes que requireRole. No depende de ninguna variable."
           }
         },
         {
           "name": "List job runs - old X-Admin-Key header -> 401",
           "request": {
             "method": "GET",
-            "header": [{ "key": "X-Admin-Key", "value": "whatever-this-no-longer-exists" }],
+            "header": [
+              {
+                "key": "X-Admin-Key",
+                "value": "whatever-this-no-longer-exists"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "job-runs"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "job-runs"
+              ]
             },
-            "description": "E3-10: the retired X-Admin-Key header is not read anywhere anymore - with no Authorization header this is still just a 401, same as any other unauthenticated request."
+            "description": "Prueba de error: el header X-Admin-Key ya no se usa en ningún lado; sin header Authorization, esto sigue siendo un simple 401, igual que cualquier request sin autenticar. No depende de ninguna variable."
           }
         },
         {
           "name": "List job runs - non-admin token -> 403",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "job-runs"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "job-runs"
+              ]
             },
-            "description": "E3-9: a valid token whose Mongo role is still the default 'user' -> 403 FORBIDDEN."
+            "description": "Prueba de error: un token válido cuyo rol en Mongo sigue siendo el default 'user' devuelve 403 FORBIDDEN. Depende de `idToken` de una cuenta sin rol admin."
           }
         },
         {
           "name": "List job runs (filtered by status)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs?status=success,partial&limit=10",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "job-runs"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "job-runs"
+              ],
               "query": [
-                { "key": "status", "value": "success,partial" },
-                { "key": "limit", "value": "10" }
+                {
+                  "key": "status",
+                  "value": "success,partial"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
               ]
             },
-            "description": "E3-9: role=admin -> 200. Needs `adminIdToken` from a user actually promoted with npm run user:set-role."
+            "description": "Lista las corridas de jobs filtrando por status (success,partial) y limitando la cantidad de resultados. Depende de `adminIdToken` de un usuario efectivamente promovido con npm run user:set-role."
           }
         },
         {
           "name": "List job runs (filtered by jobName + date range)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs?jobName=poll-prices&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "job-runs"],
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "job-runs"
+              ],
               "query": [
-                { "key": "jobName", "value": "poll-prices" },
-                { "key": "from", "value": "2026-09-01T00:00:00Z" },
-                { "key": "to", "value": "2026-09-23T00:00:00Z" }
+                {
+                  "key": "jobName",
+                  "value": "poll-prices"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-09-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-23T00:00:00Z"
+                }
               ]
-            }
+            },
+            "description": "Lista las corridas de jobs filtrando por nombre de job (jobName) y rango de fechas (from/to). Depende de `adminIdToken`."
           }
         },
         {
           "name": "Job run detail",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs/{{jobRunId}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "job-runs", "{{jobRunId}}"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "job-runs",
+                "{{jobRunId}}"
+              ]
             },
-            "description": "Replace {{jobRunId}} with a real _id from the list response."
+            "description": "Devuelve el detalle de una corrida de job puntual. Depende de `adminIdToken` y de `jobRunId`: reemplazar {{jobRunId}} con un _id real de la respuesta de un listado de esta carpeta."
           }
         },
         {
           "name": "Job run detail - malformed id -> 400",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/job-runs/not-an-object-id",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "job-runs", "not-an-object-id"]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "job-runs",
+                "not-an-object-id"
+              ]
+            },
+            "description": "Prueba de error: pasar un id que no es un ObjectId válido de Mongo devuelve 400 VALIDATION_ERROR. Depende de `adminIdToken`."
           }
         }
       ]
     },
     {
       "name": "Admin - Coins",
+      "description": "Gestión del catálogo de monedas (alta, desactivación, reactivación), solo para administradores. Necesita `adminIdToken` con rol admin ya promovido en Mongo. Dar de alta o reactivar una moneda llama a la API real de CoinGecko una vez, así que el servidor necesita `COINGECKO_API_KEY` configurada.",
       "item": [
         {
           "name": "Add a coin - non-admin token -> 403",
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{idToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"bitcoin\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"bitcoin\"\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/coins",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "coins"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "coins"
+              ]
             },
-            "description": "E4-9: a valid token whose Mongo role is still 'user' -> 403 FORBIDDEN."
+            "description": "Prueba de error: un token válido cuyo rol en Mongo sigue siendo 'user' devuelve 403 FORBIDDEN. Depende de `idToken` de una cuenta sin rol admin."
           }
         },
         {
           "name": "List coins (paginated, includes inactive)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/coins",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "coins"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "coins"
+              ]
             },
-            "description": "Unlike the public /api/v1/coins, this includes inactive coins and each item carries watchersCount."
+            "description": "Lista todas las monedas del catálogo con paginación. A diferencia del endpoint público /api/v1/coins, incluye las inactivas y cada item trae watchersCount. Depende de `adminIdToken`."
           }
         },
         {
           "name": "List coins (filtered isActive=false)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/coins?isActive=false",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "coins"],
-              "query": [{ "key": "isActive", "value": "false" }]
-            }
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "coins"
+              ],
+              "query": [
+                {
+                  "key": "isActive",
+                  "value": "false"
+                }
+              ]
+            },
+            "description": "Igual que el listado anterior, pero filtrando solo las monedas desactivadas (isActive=false). Depende de `adminIdToken`."
           }
         },
         {
@@ -892,16 +2249,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminIdToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"chainlink\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"chainlink\"\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/coins",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "coins"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "coins"
+              ]
             },
-            "description": "Validated against CoinGecko first - consumes one API call. 201 if new, 200 if it existed inactive (reactivated), 409 if already active."
+            "description": "Da de alta una moneda nueva en el catálogo. Primero se valida contra CoinGecko (consume una llamada real a su API): 201 si es nueva, 200 si ya existía inactiva (se reactiva), 409 si ya estaba activa. Depende de `adminIdToken` y de `COINGECKO_API_KEY` configurada en el servidor."
           }
         },
         {
@@ -909,16 +2282,32 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminIdToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"not-a-real-coingecko-id\"\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"not-a-real-coingecko-id\"\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/coins",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "coins"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "coins"
+              ]
             },
-            "description": "E4-10: CoinGecko's getMarkets doesn't return this id -> 422 UNKNOWN_COINGECKO_ID."
+            "description": "Prueba de error: si getMarkets de CoinGecko no devuelve ese id, la creación falla con 422 UNKNOWN_COINGECKO_ID. Depende de `adminIdToken` y de `COINGECKO_API_KEY` configurada en el servidor."
           }
         },
         {
@@ -926,16 +2315,33 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminIdToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"isActive\": false\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/coins/bitcoin",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "coins", "bitcoin"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "coins",
+                "bitcoin"
+              ]
             },
-            "description": "E4-8: 200 with the coin and its watchersCount, so the admin sees the blast radius. Still listed to users with isActive: false; the next job run stops requesting it."
+            "description": "Desactiva una moneda del catálogo: 200 con la moneda y su watchersCount, para que el admin vea a cuántos usuarios afecta. Sigue apareciendo en el listado público con isActive: false; el próximo poll-prices deja de consultarla. Depende de `adminIdToken`."
           }
         },
         {
@@ -943,29 +2349,234 @@
           "request": {
             "method": "PATCH",
             "header": [
-              { "key": "Authorization", "value": "Bearer {{adminIdToken}}" },
-              { "key": "Content-Type", "value": "application/json" }
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
             ],
-            "body": { "mode": "raw", "raw": "{\n  \"isActive\": true\n}" },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": true\n}"
+            },
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/coins/bitcoin",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "coins", "bitcoin"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "coins",
+                "bitcoin"
+              ]
             },
-            "description": "E4-11: 200, name/symbol refreshed from CoinGecko."
+            "description": "Reactiva una moneda previamente desactivada: 200, refrescando name/symbol desde CoinGecko. Depende de `adminIdToken` y de `COINGECKO_API_KEY` configurada en el servidor."
           }
         },
         {
           "name": "Delete a coin - not supported -> 404",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
             "url": {
               "raw": "{{baseUrl}}/api/v1/admin/coins/bitcoin",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "v1", "admin", "coins", "bitcoin"]
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "coins",
+                "bitcoin"
+              ]
             },
-            "description": "No DELETE endpoint exists for coins - falls through to the global 404. Deleting would orphan watchlist references and price history; deactivate instead."
+            "description": "Prueba de error: no existe un endpoint DELETE para monedas - cae en el 404 global. Borrar dejaría huérfanas las referencias de watchlist e historial de precios; usar 'Deactivate a coin' en su lugar. Depende de `adminIdToken`."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Notifications",
+      "description": "Vista de diagnóstico y reintento del envío de mails de alertas, solo para administradores. Necesita `adminIdToken` con rol admin ya promovido en Mongo. El envío real de mails (reintentos y 'Send an immediate test email') requiere las variables SMTP_*/MAIL_FROM configuradas en el worker y Mailpit corriendo (`docker compose up`) - revisar lo enviado en http://localhost:8025.",
+      "item": [
+        {
+          "name": "List notifications - non-admin token -> 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "notifications"
+              ]
+            },
+            "description": "Prueba de error: un token válido cuyo rol en Mongo sigue siendo 'user' devuelve 403 FORBIDDEN. Depende de `idToken` de una cuenta sin rol admin."
+          }
+        },
+        {
+          "name": "List notifications (full diagnostic detail)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "notifications"
+              ]
+            },
+            "description": "Lista todas las notificaciones con el detalle completo de diagnóstico. A diferencia del listado que ve el usuario, incluye el objeto lastError completo y lockedBy. Depende de `adminIdToken`."
+          }
+        },
+        {
+          "name": "List notifications - filtered by status and date range",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/notifications?status=failed&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "notifications"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "failed"
+                },
+                {
+                  "key": "from",
+                  "value": "2026-09-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-09-23T00:00:00Z"
+                }
+              ]
+            },
+            "description": "Igual que el listado con detalle diagnóstico, filtrando por status (failed) y rango de fechas (from/to). Depende de `adminIdToken`."
+          }
+        },
+        {
+          "name": "Retry a failed notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/notifications/{{notificationId}}/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "notifications",
+                "{{notificationId}}",
+                "retry"
+              ]
+            },
+            "description": "Reintenta el envío de una notificación en estado `failed`: 200 con status -> pending, attempts: 0, nextAttemptAt: ahora, lastError: null. Depende de `adminIdToken` y de `notificationId`: reemplazar {{notificationId}} con un _id real de un listado de esta carpeta. El envío efectivo requiere que 'send-notifications' corra después y que SMTP/Mailpit estén configurados."
+          }
+        },
+        {
+          "name": "Retry a non-failed notification -> 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/notifications/651f1c2e8b1e2a0012a3b901/retry",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "notifications",
+                "651f1c2e8b1e2a0012a3b901",
+                "retry"
+              ]
+            },
+            "description": "Prueba de error: reintentar una notificación en cualquier estado distinto de failed (ej. sent) devuelve 409 CONFLICT sin cambiar nada; un id desconocido devuelve 404 NOT_FOUND. Depende de `adminIdToken`."
+          }
+        },
+        {
+          "name": "Send an immediate test email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/notifications/test-email",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "notifications",
+                "test-email"
+              ]
+            },
+            "description": "Envía un mail de prueba de forma inmediata al propio email del admin que llama, sin pasar por el outbox (no crea ningún documento de notificación). 200 con un messageId si sale bien, o 502 UPSTREAM_ERROR (details.reason trae el código del mailer) si SMTP no está disponible. Depende de `adminIdToken` y de que el servidor tenga SMTP_*/MAIL_FROM configurados y Mailpit corriendo (`docker compose up`); revisar el resultado en http://localhost:8025."
           }
         }
       ]
