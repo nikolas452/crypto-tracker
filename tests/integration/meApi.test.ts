@@ -3,6 +3,8 @@ import request from 'supertest';
 import pino from 'pino';
 import { createApp } from '../../src/app.js';
 import { UserModel } from '../../src/modules/users/users.model.js';
+import { CoinModel } from '../../src/modules/coins/coins.model.js';
+import { WatchlistItemModel } from '../../src/modules/watchlist/watchlist.model.js';
 import { createFakeTokenVerifier } from '../../src/integrations/firebase/fakeTokenVerifier.js';
 import { ensureCollections } from '../../src/db/ensureCollections.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
@@ -55,9 +57,7 @@ describe('me API (integration)', () => {
   // E3-4.
   it('E3-4: a new uid is provisioned and its profile returned', async () => {
     const app = createAppWithFakeAuth();
-    const response = await request(app)
-      .get('/api/v1/me')
-      .set('Authorization', `Bearer ${TOKEN}`);
+    const response = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${TOKEN}`);
 
     expect(response.status).toBe(200);
     expect(response.body.data).toMatchObject({
@@ -160,6 +160,31 @@ describe('me API (integration)', () => {
       expect(count).toBe(0);
     });
 
+    // E4-12 / spec account-deletion-cascade: los ítems de watchlist se
+    // borran antes que el propio usuario.
+    it("E4-12: deletes the user's watchlist items along with the account", async () => {
+      const app = createAppWithFakeAuth();
+      await request(app).get('/api/v1/me').set('Authorization', `Bearer ${TOKEN}`);
+      const user = await UserModel.findOne({ firebaseUid: IDENTITY.uid });
+
+      const coins = await CoinModel.create([
+        { coingeckoId: 'bitcoin', symbol: 'btc', name: 'Bitcoin', isActive: true },
+        { coingeckoId: 'ethereum', symbol: 'eth', name: 'Ethereum', isActive: true },
+        { coingeckoId: 'solana', symbol: 'sol', name: 'Solana', isActive: true },
+      ]);
+      await WatchlistItemModel.create(
+        coins.map((coin) => ({ userId: user!._id, coinId: coin._id, note: null })),
+      );
+
+      const response = await request(app)
+        .delete('/api/v1/me')
+        .set('Authorization', `Bearer ${TOKEN}`);
+
+      expect(response.status).toBe(204);
+      const remainingItems = await WatchlistItemModel.countDocuments({ userId: user!._id });
+      expect(remainingItems).toBe(0);
+    });
+
     // Documentado en el README (tarea 7.5): la cuenta de Firebase sobrevive,
     // así que un request posterior con un token todavía válido reaprovisiona
     // un perfil vacío nuevo.
@@ -168,9 +193,7 @@ describe('me API (integration)', () => {
       await request(app).get('/api/v1/me').set('Authorization', `Bearer ${TOKEN}`);
       await request(app).delete('/api/v1/me').set('Authorization', `Bearer ${TOKEN}`);
 
-      const response = await request(app)
-        .get('/api/v1/me')
-        .set('Authorization', `Bearer ${TOKEN}`);
+      const response = await request(app).get('/api/v1/me').set('Authorization', `Bearer ${TOKEN}`);
 
       expect(response.status).toBe(200);
       expect(response.body.data.role).toBe('user');

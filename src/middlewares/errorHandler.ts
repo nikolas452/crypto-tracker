@@ -1,8 +1,14 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { Logger } from 'pino';
-import { AppError, type ErrorCode, type ErrorDetail } from '../lib/errors.js';
+import { AppError, type ErrorCode, type ErrorDetails } from '../lib/errors.js';
 import { config, type Config } from '../config/env.js';
 import { readRequestId } from './requestId.js';
+
+/**
+ * Manejador de errores centralizado de Express: traduce cualquier error
+ * lanzado en la cadena de middlewares/rutas a la forma global de respuesta
+ * del proyecto `{ error: { code, message, details?, requestId } }`.
+ */
 
 interface BodyParserLikeError extends Error {
   type?: string;
@@ -35,7 +41,7 @@ function sendError(
   code: ErrorCode,
   message: string,
   requestId: string,
-  details?: readonly ErrorDetail[] | { stack?: string },
+  details?: ErrorDetails | { stack?: string },
 ): void {
   res.status(status).json({
     error: {

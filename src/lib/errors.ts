@@ -31,8 +31,17 @@ export interface ErrorDetail {
   readonly message: string;
 }
 
+/**
+ * Forma de `details` en un error de aplicación: o bien la lista de issues de
+ * campo que produce {@link validate}, o bien un objeto arbitrario de una
+ * sola vez (por ejemplo `{ reason: 'LIMIT_REACHED' }` — specs
+ * watchlist-write-api / admin-coin-management), para errores de negocio que
+ * no derivan de la validación de un schema de Zod.
+ */
+export type ErrorDetails = readonly ErrorDetail[] | Record<string, unknown>;
+
 export interface AppErrorOptions {
-  readonly details?: readonly ErrorDetail[];
+  readonly details?: ErrorDetails;
   readonly cause?: unknown;
 }
 
@@ -44,7 +53,7 @@ export interface AppErrorOptions {
 export class AppError extends Error {
   readonly code: ErrorCode;
   readonly httpStatus: number;
-  readonly details?: readonly ErrorDetail[];
+  readonly details?: ErrorDetails;
 
   constructor(code: ErrorCode, httpStatus: number, message: string, options: AppErrorOptions = {}) {
     super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
@@ -56,8 +65,16 @@ export class AppError extends Error {
   }
 }
 
+export interface ValidationErrorOptions {
+  /** Siempre la lista de issues de campo que produce {@link validate}, nunca el objeto `{ reason }` de un error de negocio. */
+  readonly details?: readonly ErrorDetail[];
+  readonly cause?: unknown;
+}
+
 export class ValidationError extends AppError {
-  constructor(message = 'Datos inválidos', options: AppErrorOptions = {}) {
+  declare readonly details?: readonly ErrorDetail[];
+
+  constructor(message = 'Datos inválidos', options: ValidationErrorOptions = {}) {
     super('VALIDATION_ERROR', 400, message, options);
   }
 }

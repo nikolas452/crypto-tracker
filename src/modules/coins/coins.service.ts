@@ -289,3 +289,47 @@ export async function findCoinIdByCoingeckoId(coingeckoId: string): Promise<Type
     .exec();
   return doc ? doc._id : null;
 }
+
+/** La forma reducida de una moneda que necesitan el módulo de watchlist y el de administración de monedas. */
+export interface CoinRef {
+  readonly id: Types.ObjectId;
+  readonly coingeckoId: string;
+  readonly symbol: string;
+  readonly name: string;
+  readonly isActive: boolean;
+  readonly latest: CoinDtoSource['latest'];
+}
+
+interface CoinRefProjection {
+  _id: Types.ObjectId;
+  coingeckoId: string;
+  symbol: string;
+  name: string;
+  isActive: boolean;
+  latest: CoinDtoSource['latest'];
+}
+
+/**
+ * Busca una moneda por `coingeckoId` sin importar `isActive`, con la
+ * proyección mínima que necesitan el servicio de watchlist (RF-4.2: "la
+ * moneda existe y está activa" / RF-4.3: "activa o no") y el de
+ * administración de monedas (reactivación). Devuelve `null` cuando no existe
+ * ninguna moneda con ese id.
+ */
+export async function findCoinRefByCoingeckoId(coingeckoId: string): Promise<CoinRef | null> {
+  const doc = await CoinModel.findOne({ coingeckoId })
+    .select({ coingeckoId: 1, symbol: 1, name: 1, isActive: 1, latest: 1 })
+    .lean<CoinRefProjection | null>()
+    .exec();
+
+  return doc
+    ? {
+        id: doc._id,
+        coingeckoId: doc.coingeckoId,
+        symbol: doc.symbol,
+        name: doc.name,
+        isActive: doc.isActive,
+        latest: doc.latest,
+      }
+    : null;
+}

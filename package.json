@@ -24,6 +24,7 @@
     "coins:rebuild-latest": "tsx --env-file-if-exists=.env src/scripts/rebuildLatest.ts",
     "backfill:history": "tsx --env-file-if-exists=.env src/scripts/backfillHistory.ts",
     "perf:coins-list": "tsx --env-file-if-exists=.env src/scripts/perf/coinsListPerf.ts",
+    "perf:watchlist": "tsx --env-file-if-exists=.env src/scripts/perf/watchlistPerf.ts",
     "auth:create-test-user": "tsx --env-file-if-exists=.env src/scripts/createTestUser.ts",
     "auth:token": "tsx --env-file-if-exists=.env src/scripts/authToken.ts",
     "user:set-role": "tsx --env-file-if-exists=.env src/scripts/setRole.ts"

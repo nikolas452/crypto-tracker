@@ -33,3 +33,14 @@ export function cacheControlNoStore(_req: Request, res: Response, next: NextFunc
   res.setHeader('Cache-Control', 'no-store');
   next();
 }
+
+/**
+ * `Cache-Control: private, no-cache` para `GET /api/v1/me/watchlist` (spec
+ * watchlist-read-api): la respuesta es de un usuario en particular y nunca
+ * debe terminar en una caché compartida (`private`), pero sí puede
+ * revalidarse con el cliente (`no-cache`, a diferencia de `no-store`).
+ */
+export function cacheControlPrivateNoCache(_req: Request, res: Response, next: NextFunction): void {
+  res.setHeader('Cache-Control', 'private, no-cache');
+  next();
+}

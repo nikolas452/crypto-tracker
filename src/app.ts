@@ -10,15 +10,30 @@ import { createRateLimiter } from './middlewares/rateLimiter.js';
 import { createUserRateLimiter } from './middlewares/userRateLimiter.js';
 import { requireAuth } from './middlewares/requireAuth.js';
 import { requireRole } from './middlewares/requireRole.js';
-import { cacheControlNoStore, cacheControlPublic } from './middlewares/cacheControl.js';
+import {
+  cacheControlNoStore,
+  cacheControlPrivateNoCache,
+  cacheControlPublic,
+} from './middlewares/cacheControl.js';
 import { createHealthRouter } from './routes/health.routes.js';
 import { createCoinsRouter } from './modules/coins/coins.routes.js';
+import { createAdminCoinsRouter } from './modules/coins/coins.admin.routes.js';
 import { createStatusRouter } from './modules/status/status.routes.js';
 import { createJobRunsRouter } from './modules/job-runs/job-runs.routes.js';
 import { createUsersRouter } from './modules/users/users.routes.js';
-import { createMongoReadinessCheck, type ReadinessCheck } from './lib/health.js';
+import { createWatchlistRouter } from './modules/watchlist/watchlist.routes.js';
+import {
+  createMongoReadinessCheck,
+  createCoinGeckoReadinessCheck,
+  type ReadinessCheck,
+} from './lib/health.js';
 import { logger as defaultLogger } from './lib/logger.js';
-import { createLazyFirebaseTokenVerifier, type TokenVerifier } from './integrations/firebase/tokenVerifier.js';
+import {
+  createLazyFirebaseTokenVerifier,
+  type TokenVerifier,
+} from './integrations/firebase/tokenVerifier.js';
+import { createLazyCoinGeckoClient } from './integrations/coingecko/coingecko.client.js';
+import type { CoinGeckoClient } from './integrations/coingecko/coingecko.types.js';
 
 export interface CreateAppDeps {
   /** Por defecto, la instancia compartida de pino de `src/lib/logger.ts`. */
@@ -49,6 +64,15 @@ export interface CreateAppDeps {
    */
   readonly userRateLimitConfig?: Pick<Config, 'USER_RATE_LIMIT_PER_MIN'>;
   /**
+   * Override exclusivo para tests del cap de ítems de watchlist
+   * (`WATCHLIST_MAX_ITEMS`, spec watchlist-store). Por defecto, el `config`
+   * real (50). Mismo motivo que `rateLimitConfig`: permite ejercitar el cap
+   * con un valor pequeño (por ejemplo, E4-4 con `WATCHLIST_MAX_ITEMS=2`) sin
+   * sembrar decenas de ítems ni mutar `process.env` para un singleton a
+   * nivel de módulo que ya fue parseado.
+   */
+  readonly watchlistConfig?: Pick<Config, 'WATCHLIST_MAX_ITEMS'>;
+  /**
    * Verificador de tokens de ID de Firebase (spec token-verification). Por
    * defecto, una implementación perezosa respaldada por Firebase Admin real
    * (`createLazyFirebaseTokenVerifier()`), que no toca `firebase-admin` hasta
@@ -59,6 +83,18 @@ export interface CreateAppDeps {
    * `logger`/`rateLimitConfig`/`userRateLimitConfig`.
    */
   readonly tokenVerifier?: TokenVerifier;
+  /**
+   * Cliente de CoinGecko (spec admin-coin-management / watchlists tarea
+   * 1.2), usado por los endpoints de administración de monedas para
+   * validar un `coingeckoId` con `getMarkets([id])`, y por el chequeo de
+   * disponibilidad opcional `coingecko` cuando `COINGECKO_READINESS_ENABLED`
+   * está habilitado. Por defecto, `createLazyCoinGeckoClient()` — no
+   * construye el cliente real (ni exige `COINGECKO_API_KEY`) hasta que se
+   * invoca su primer método, el mismo patrón que `tokenVerifier`. En un
+   * proceso real, `server.ts` construye el cliente real y ya llamó a
+   * `assertCoinGeckoApiKey()` antes de construir la app.
+   */
+  readonly coingecko?: CoinGeckoClient;
 }
 
 /**
@@ -76,15 +112,24 @@ export interface CreateAppDeps {
  * monedas y la ruta de status, cada una precedida por su middleware
  * `Cache-Control`; `/me`, cada uno de cuyos verbos llama a `requireAuth` con
  * sus propias opciones y encadena el limitador de tasa por uid compartido;
- * las rutas de admin precedidas por `Cache-Control: no-store` y protegidas
+ * `/me/watchlist`, precedida por `Cache-Control: private, no-cache`, con
+ * `requireAuth()` y el mismo limitador por uid montados una sola vez dentro
+ * del router; las rutas de admin precedidas por `Cache-Control: no-store` y protegidas
  * por `requireAuth({ checkRevoked: true })` + el mismo limitador por uid +
  * `requireRole('admin')`) -> manejador 404 -> manejador de errores
  * centralizado.
  */
 export function createApp(deps: CreateAppDeps = {}): Express {
   const logger = deps.logger ?? defaultLogger;
-  const readinessChecks = deps.readinessChecks ?? [createMongoReadinessCheck()];
   const tokenVerifier = deps.tokenVerifier ?? createLazyFirebaseTokenVerifier();
+  const coingecko = deps.coingecko ?? createLazyCoinGeckoClient();
+  // El chequeo `coingecko` solo se agrega cuando `COINGECKO_READINESS_ENABLED`
+  // está habilitado (spec health-checks: "deshabilitado por defecto") — así
+  // una caída de CoinGecko nunca saca a la API de rotación por sí sola.
+  const readinessChecks = deps.readinessChecks ?? [
+    createMongoReadinessCheck(),
+    ...(config.COINGECKO_READINESS_ENABLED ? [createCoinGeckoReadinessCheck(coingecko)] : []),
+  ];
   // Instancia única compartida entre `/me` y `/admin` (spec
   // user-rate-limiting: "un solo presupuesto por usuario", no uno
   // independiente por ruta) — ver `userRateLimiter.ts`.
@@ -125,6 +170,17 @@ export function createApp(deps: CreateAppDeps = {}): Express {
   // (ver users.routes.ts).
   app.use('/api/v1/me', createUsersRouter(userRateLimiter));
 
+  // `/me/watchlist`: Cache-Control: private, no-cache montado a nivel de
+  // router (spec watchlist-read-api); requireAuth() + el mismo limitador de
+  // tasa por uid se montan una sola vez dentro de watchlist.routes.ts, ya
+  // que las cuatro rutas usan exactamente las mismas opciones (a diferencia
+  // de `/me`).
+  app.use(
+    '/api/v1/me/watchlist',
+    cacheControlPrivateNoCache,
+    createWatchlistRouter(userRateLimiter, deps.watchlistConfig ?? config),
+  );
+
   // requireAuth + requireRole reemplazan al retirado requireAdminKey (spec
   // role-authorization, auth-firebase tarea 6.2/6.3): se montan sobre el
   // propio prefijo `/api/v1/admin` (no solo sobre el router de job-runs) para
@@ -138,6 +194,9 @@ export function createApp(deps: CreateAppDeps = {}): Express {
     requireRole('admin'),
   );
   app.use('/api/v1/admin/job-runs', createJobRunsRouter());
+  // RF-4.6: alta/reactivación/activación de monedas, validadas contra
+  // CoinGecko con el cliente inyectado (deps.coingecko / tarea 1.2).
+  app.use('/api/v1/admin/coins', createAdminCoinsRouter(coingecko));
 
   if (deps.registerTestRoutes) {
     deps.registerTestRoutes(app);

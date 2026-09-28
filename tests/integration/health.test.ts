@@ -1,7 +1,8 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import mongoose from 'mongoose';
 import request from 'supertest';
 import { createApp } from '../../src/app.js';
+import { createCoinGeckoReadinessCheck, createMongoReadinessCheck } from '../../src/lib/health.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
 
 /** Tests de integración de los endpoints de salud (`GET /health`, `GET /health/ready`). */
@@ -42,6 +43,21 @@ describe('health checks (integration)', () => {
     expect(response.body.checks.mongo).toBe('up');
   });
 
+  // Tarea 7.2 / spec health-checks: el chequeo `coingecko` está deshabilitado
+  // por defecto (`COINGECKO_READINESS_ENABLED=false` en el entorno de test),
+  // así que ni siquiera aparece en `checks`, y un CoinGecko inalcanzable
+  // (acá, el cliente perezoso por defecto sin `COINGECKO_API_KEY`) nunca
+  // afecta el 200 de readiness. Se ejecuta ANTES de E0-3 porque, igual que
+  // E0-2, depende de que Mongo siga conectado.
+  it('with the coingecko check disabled (default), GET /health/ready responds 200 with no checks.coingecko entry', async () => {
+    const app = createApp();
+
+    const response = await request(app).get('/health/ready');
+
+    expect(response.status).toBe(200);
+    expect(response.body.checks.coingecko).toBeUndefined();
+  });
+
   // E0-3: con Mongo desconectado, GET /health/ready devuelve 503 con status not_ready.
   // Se ejecuta último entre los checks que dependen de Mongo: desconecta Mongoose
   // dentro del test a propósito y no se reconecta, según el escenario ("desconectar
@@ -76,5 +92,23 @@ describe('health checks (integration)', () => {
 
     expect(response.headers['x-request-id']).toBeDefined();
     expect(response.headers['x-request-id']).not.toBe(tooLong);
+  });
+
+  // Complementa el caso "deshabilitado" de arriba con el escenario "explícitamente
+  // habilitado" de la spec (health-checks): reporta `checks.coingecko: "down"` y 503
+  // cuando el chequeo se agrega manualmente vía `readinessChecks` y CoinGecko falla.
+  it('when explicitly enabled and CoinGecko is unreachable, GET /health/ready includes checks.coingecko: "down"', async () => {
+    const failingCoingecko = { ping: vi.fn(async () => Promise.reject(new Error('unreachable'))) };
+    const app = createApp({
+      readinessChecks: [
+        createMongoReadinessCheck(),
+        createCoinGeckoReadinessCheck(failingCoingecko),
+      ],
+    });
+
+    const response = await request(app).get('/health/ready');
+
+    expect(response.status).toBe(503);
+    expect(response.body.checks.coingecko).toBe('down');
   });
 });

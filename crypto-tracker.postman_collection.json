@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b6f2a1a0-6e3e-4b1a-9e7a-4f2c8f1c9d10",
     "name": "Crypto Tracker API",
-    "description": "Stage 0 (base setup) + Stage 2 (api-rest) + Stage 3 (auth-firebase) endpoints. Mirrors requests.http.\n\nRun `npm run dev` first. Stage 2 requests need a seeded catalog (`npm run seed:coins`) and at least one poll-prices run (`npm run job:poll-prices` or `npm run dev:worker`) for non-empty responses.\n\nStage 3 (auth): the old `X-Admin-Key` header is gone. Every authenticated request needs a Firebase ID token. The 'Auth (Firebase)' folder gets you one straight from Postman against the local Auth emulator (`firebase emulators:start --only auth`), no CLI script required:\n1. Run 'Sign up (create test user)' once per test account — it also stores the token in `idToken`.\n2. Call 'Me > Get my profile' once with that token to provision the Mongo profile.\n3. For admin requests, repeat steps 1-2 with the `adminEmail`/`adminPassword` variables to get `adminIdToken`, then run `npm run user:set-role -- --email {{adminEmail}} --role admin` from a terminal (Postman can create the Firebase account and provision the Mongo profile, but promoting to admin is a deliberate out-of-band step — see design.md).\n\nTo test against a real Firebase project instead of the emulator, change `authApiBaseUrl` to `https://identitytoolkit.googleapis.com/v1` and set `firebaseWebApiKey` to your project's real Web API Key (Firebase console -> Project settings -> General).",
+    "description": "Stage 0 (base setup) + Stage 2 (api-rest) + Stage 3 (auth-firebase) + Stage 4 (watchlists) endpoints. Mirrors requests.http.\n\nRun `npm run dev` first. Stage 2 requests need a seeded catalog (`npm run seed:coins`) and at least one poll-prices run (`npm run job:poll-prices` or `npm run dev:worker`) for non-empty responses.\n\nStage 3 (auth): the old `X-Admin-Key` header is gone. Every authenticated request needs a Firebase ID token. The 'Auth (Firebase)' folder gets you one straight from Postman against the local Auth emulator (`firebase emulators:start --only auth`), no CLI script required:\n1. Run 'Sign up (create test user)' once per test account — it also stores the token in `idToken`.\n2. Call 'Me > Get my profile' once with that token to provision the Mongo profile.\n3. For admin requests, repeat steps 1-2 with the `adminEmail`/`adminPassword` variables to get `adminIdToken`, then run `npm run user:set-role -- --email {{adminEmail}} --role admin` from a terminal (Postman can create the Firebase account and provision the Mongo profile, but promoting to admin is a deliberate out-of-band step — see design.md).\n\nTo test against a real Firebase project instead of the emulator, change `authApiBaseUrl` to `https://identitytoolkit.googleapis.com/v1` and set `firebaseWebApiKey` to your project's real Web API Key (Firebase console -> Project settings -> General).\n\nStage 4 (watchlists): 'My Watchlist' needs `idToken` (see Stage 3) plus a seeded, active coin (`bitcoin` by default). 'Admin - Coins' needs `adminIdToken`. Each admin coin creation calls the real CoinGecko API once, so `COINGECKO_API_KEY` must be set on the server.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -546,6 +546,199 @@
       ]
     },
     {
+      "name": "My Watchlist",
+      "item": [
+        {
+          "name": "List my watchlist - no token -> 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist"]
+            },
+            "description": "401 UNAUTHENTICATED - no Authorization header."
+          }
+        },
+        {
+          "name": "List my watchlist",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist"]
+            },
+            "description": "Default sort: addedAt desc. Returns { data, meta: { count, max } }, no userId/_id leaked (RNF-4.3)."
+          }
+        },
+        {
+          "name": "List my watchlist - sorted by 24h change",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist?sort=change24h&order=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist"],
+              "query": [
+                { "key": "sort", "value": "change24h" },
+                { "key": "order", "value": "desc" }
+              ]
+            },
+            "description": "E4-13: sort=change24h&order=desc orders by latest.change24hPct descending."
+          }
+        },
+        {
+          "name": "List my watchlist - unknown query param -> 400",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist?page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist"],
+              "query": [{ "key": "page", "value": "1" }]
+            },
+            "description": "No pagination accepted here - the list is bounded by WATCHLIST_MAX_ITEMS instead."
+          }
+        },
+        {
+          "name": "Add a coin",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"bitcoin\",\n  \"note\": \"largo plazo\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist"]
+            },
+            "description": "201 with the item in listing shape + Location: /api/v1/me/watchlist/bitcoin. Requires bitcoin to exist and be active (seeded by default - see npm run seed:coins)."
+          }
+        },
+        {
+          "name": "Add the same coin again -> 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"bitcoin\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist"]
+            },
+            "description": "E4-2: duplicate {userId, coinId} pair -> 409 CONFLICT (translated from the unique index's E11000)."
+          }
+        },
+        {
+          "name": "Add an unknown or inactive coin -> 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"no-existe\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist"]
+            },
+            "description": "E4-3: coin not in the catalog, or inactive -> 404 NOT_FOUND."
+          }
+        },
+        {
+          "name": "Add a coin - client-supplied userId -> 400",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"coingeckoId\": \"bitcoin\",\n  \"userId\": \"000000000000000000000000\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist"]
+            },
+            "description": "RF-4.5: the body schema is .strict() - userId is never read from the client, only from the token. 400 VALIDATION_ERROR."
+          }
+        },
+        {
+          "name": "Update the note",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"note\": \"actualizado\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist/Bitcoin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist", "Bitcoin"]
+            },
+            "description": "The coingeckoId path segment is normalized to lowercase before lookup, so a mixed-case id still resolves."
+          }
+        },
+        {
+          "name": "Update the note - coin not followed -> 404",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"note\": \"no la sigo\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist/ethereum",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist", "ethereum"]
+            },
+            "description": "E4-7: patching a coin you don't follow -> 404 NOT_FOUND."
+          }
+        },
+        {
+          "name": "Remove a coin",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist/bitcoin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist", "bitcoin"]
+            },
+            "description": "E4-6: always 204, even if it was never followed (idempotent delete)."
+          }
+        },
+        {
+          "name": "Remove a coin - malformed id -> 400",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{idToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/me/watchlist/Not_Valid!",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "me", "watchlist", "Not_Valid!"]
+            },
+            "description": "The only case DELETE ever returns 400: the coingeckoId itself fails pattern validation."
+          }
+        }
+      ]
+    },
+    {
       "name": "Admin - Job Runs",
       "item": [
         {
@@ -644,6 +837,135 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "v1", "admin", "job-runs", "not-an-object-id"]
             }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Coins",
+      "item": [
+        {
+          "name": "Add a coin - non-admin token -> 403",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{idToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"bitcoin\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/coins",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "coins"]
+            },
+            "description": "E4-9: a valid token whose Mongo role is still 'user' -> 403 FORBIDDEN."
+          }
+        },
+        {
+          "name": "List coins (paginated, includes inactive)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/coins",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "coins"]
+            },
+            "description": "Unlike the public /api/v1/coins, this includes inactive coins and each item carries watchersCount."
+          }
+        },
+        {
+          "name": "List coins (filtered isActive=false)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/coins?isActive=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "coins"],
+              "query": [{ "key": "isActive", "value": "false" }]
+            }
+          }
+        },
+        {
+          "name": "Add a new coin",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminIdToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"chainlink\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/coins",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "coins"]
+            },
+            "description": "Validated against CoinGecko first - consumes one API call. 201 if new, 200 if it existed inactive (reactivated), 409 if already active."
+          }
+        },
+        {
+          "name": "Add a coin - unknown CoinGecko id -> 422",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminIdToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"coingeckoId\": \"not-a-real-coingecko-id\"\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/coins",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "coins"]
+            },
+            "description": "E4-10: CoinGecko's getMarkets doesn't return this id -> 422 UNKNOWN_COINGECKO_ID."
+          }
+        },
+        {
+          "name": "Deactivate a coin",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminIdToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"isActive\": false\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/coins/bitcoin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "coins", "bitcoin"]
+            },
+            "description": "E4-8: 200 with the coin and its watchersCount, so the admin sees the blast radius. Still listed to users with isActive: false; the next job run stops requesting it."
+          }
+        },
+        {
+          "name": "Reactivate a coin",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{adminIdToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"isActive\": true\n}" },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/coins/bitcoin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "coins", "bitcoin"]
+            },
+            "description": "E4-11: 200, name/symbol refreshed from CoinGecko."
+          }
+        },
+        {
+          "name": "Delete a coin - not supported -> 404",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminIdToken}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/coins/bitcoin",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "admin", "coins", "bitcoin"]
+            },
+            "description": "No DELETE endpoint exists for coins - falls through to the global 404. Deleting would orphan watchlist references and price history; deactivate instead."
           }
         }
       ]

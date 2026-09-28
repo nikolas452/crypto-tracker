@@ -26,16 +26,27 @@ const baseEnvSchema = z.object({
   SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10000),
 
   // --- primer-job: cliente de CoinGecko ---
-  // Opcional a nivel de schema para que el proceso de la API (que no
-  // necesita CoinGecko hasta una etapa posterior) pueda arrancar sin ella.
-  // Los entrypoints que sí la necesitan (worker, script de seed, script de
-  // ejecución manual) llaman a `assertCoinGeckoApiKey()` justo después de
-  // cargar la config para fallar rápido.
+  // Opcional a nivel de schema (aunque, desde watchlists, TODO entrypoint la
+  // exige en la práctica) para que `parseEnv` siga siendo testeable sin ella
+  // y para reutilizar el mismo mecanismo de guarda de fallo rápido. Los
+  // entrypoints que la necesitan (worker, script de seed, script de
+  // ejecución manual, y ahora también la API — RF-4.8: los endpoints de
+  // administración de monedas llaman a CoinGecko) llaman a
+  // `assertCoinGeckoApiKey()` justo después de cargar la config para fallar
+  // rápido.
   COINGECKO_API_KEY: z.string().min(1).optional(),
   COINGECKO_BASE_URL: z.string().min(1).default('https://api.coingecko.com/api/v3'),
   COINGECKO_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
   COINGECKO_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
   COINGECKO_MAX_IDS_PER_CALL: z.coerce.number().int().min(1).max(250).default(50),
+  // Chequeo de disponibilidad opcional `coingecko` de `/health/ready`
+  // (spec health-checks / RF-4.8), deshabilitado por defecto: si CoinGecko
+  // se cae, la API no debería salir de rotación en el balanceador — el
+  // chequeo existe solo para diagnóstico manual.
+  COINGECKO_READINESS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((value) => value === 'true'),
 
   // --- primer-job: job y worker de poll-prices ---
   POLL_PRICES_CRON: z.string().min(1).default('*/10 * * * *'),
@@ -89,6 +100,9 @@ const baseEnvSchema = z.object({
   // Minutos de antigüedad de `lastSeenAt` antes de refrescarlo en un request
   // autenticado (spec user-profile). Default 5.
   LAST_SEEN_THROTTLE_MIN: z.coerce.number().int().positive().default(5),
+
+  // --- watchlists: límite de ítems por usuario (spec watchlist-store) ---
+  WATCHLIST_MAX_ITEMS: z.coerce.number().int().positive().default(50),
 });
 
 // El valor por defecto de TRUST_PROXY, dependiente de NODE_ENV, se aplica
@@ -176,15 +190,17 @@ function loadConfig(source: Record<string, string | undefined>): Config {
 export const config: Config = loadConfig(process.env);
 
 /**
- * Guarda de fallo rápido usada solo por los entrypoints que realmente
- * necesitan CoinGecko (`worker.ts`, `scripts/seedCoins.ts`,
- * `scripts/pollPricesOnce.ts`).
+ * Guarda de fallo rápido usada por todo entrypoint que realmente necesita
+ * CoinGecko: `worker.ts`, `scripts/seedCoins.ts`, `scripts/pollPricesOnce.ts`
+ * y, desde watchlists (RF-4.8), también `server.ts` — los endpoints de
+ * administración de monedas llaman a CoinGecko para validar `coingeckoId`.
  *
- * `COINGECKO_API_KEY` es opcional a nivel de schema para que el proceso de
- * la API (que no la necesita hasta una etapa posterior) pueda arrancar sin
- * ella; cada entrypoint que sí la necesita llama a esto inmediatamente
- * después de cargar la config y falla rápido (log fatal + exit 1) si falta,
- * usando el mismo patrón de log-fatal-y-exit-1 que {@link loadConfig}.
+ * `COINGECKO_API_KEY` sigue siendo opcional a nivel de schema (para que
+ * `parseEnv` no la exija donde no corresponde, por ejemplo en tests
+ * unitarios de config); cada entrypoint que sí la necesita llama a esto
+ * inmediatamente después de cargar la config y falla rápido (log fatal +
+ * exit 1) si falta, usando el mismo patrón de log-fatal-y-exit-1 que
+ * {@link loadConfig}.
  */
 export function assertCoinGeckoApiKey(
   cfg: Config,

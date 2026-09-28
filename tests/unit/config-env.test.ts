@@ -23,6 +23,7 @@ describe('parseEnv', () => {
       COINGECKO_TIMEOUT_MS: 10000,
       COINGECKO_MAX_RETRIES: 2,
       COINGECKO_MAX_IDS_PER_CALL: 50,
+      COINGECKO_READINESS_ENABLED: false,
       POLL_PRICES_CRON: '*/10 * * * *',
       POLL_PRICES_RUN_ON_START: true,
       SNAPSHOT_RETENTION_DAYS: 90,
@@ -35,6 +36,7 @@ describe('parseEnv', () => {
       STALE_POLL_THRESHOLD_MIN: 30,
       USER_RATE_LIMIT_PER_MIN: 120,
       LAST_SEEN_THROTTLE_MIN: 5,
+      WATCHLIST_MAX_ITEMS: 50,
     });
   });
 

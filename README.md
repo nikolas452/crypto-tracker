@@ -5,8 +5,9 @@ prices from CoinGecko, stores history in MongoDB, and exposes a REST API to quer
 coins, history and stats. See `requerimientos/00-indice-y-convenciones.md` for the
 full project index and conventions, `requerimientos/01-etapa-0-setup-base.md` for
 Stage 0's requirements, `requerimientos/02-etapa-1-primer-job.md` for Stage 1's
-requirements, and `requerimientos/03-etapa-2-api-rest.md` for this stage's
-detailed requirements.
+requirements, `requerimientos/03-etapa-2-api-rest.md` for Stage 2's requirements,
+`requerimientos/04-etapa-3-auth-firebase.md` for Stage 3's requirements, and
+`requerimientos/05-etapa-4-watchlists.md` for this stage's detailed requirements.
 
 Stage 0 ("base setup") provided the base Express/TypeScript service: startup,
 config validation, MongoDB connection, health checks, a single error format, and
@@ -36,6 +37,18 @@ to obtain a token without a frontend (`auth:create-test-user`, `auth:token`,
 `user:set-role`). See "API endpoints (Stage 2)" below (the `/me` and admin
 sections) and "Firebase Auth: development scripts and the Auth emulator"
 further down.
+
+**Stage 4 ("watchlists")** adds the first data that belongs to a user: a
+per-user watchlist of coins (`GET`/`POST /api/v1/me/watchlist`,
+`PATCH`/`DELETE /api/v1/me/watchlist/:coingeckoId`), backed by a new
+`watchlist_items` collection and the project's isolation rule (every query
+scoped to the authenticated user, no endpoint ever accepts a client-supplied
+`userId`). It also gives the admin real write power over the coin catalog
+(`GET`/`POST /api/v1/admin/coins`, `PATCH /api/v1/admin/coins/:coingeckoId`),
+extends `DELETE /api/v1/me` into a proper cascade that removes the user's
+watchlist first, and makes `COINGECKO_API_KEY` required for the API process
+too (previously only the worker/scripts needed it). See "API endpoints
+(Stage 4 — watchlists)" below for the full contract.
 
 ## Requirements
 
@@ -81,36 +94,38 @@ further down.
 
 ## Environment variables
 
-| Variable                     | Type                                    | Required                    | Default                                          | Rules                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------- | --------------------------------------- | --------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV`                   | `development` \| `test` \| `production` | No                          | `development`                                    | —                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `PORT`                       | integer                                 | No                          | `3000`                                           | 1–65535                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `MONGODB_URI`                | string                                  | **Yes**                     | —                                                | Must start with `mongodb://` or `mongodb+srv://`                                                                                                                                                                                                                                                                                                                                                         |
-| `MONGODB_DB_NAME`            | string                                  | No                          | `crypto_tracker`                                 | Non-empty                                                                                                                                                                                                                                                                                                                                                                                                |
-| `LOG_LEVEL`                  | pino level                              | No                          | `info`                                           | `fatal`\|`error`\|`warn`\|`info`\|`debug`\|`trace`\|`silent`                                                                                                                                                                                                                                                                                                                                             |
-| `SHUTDOWN_TIMEOUT_MS`        | integer                                 | No                          | `10000`                                          | >= 1000                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `COINGECKO_API_KEY`          | string                                  | **Only for worker/scripts** | —                                                | CoinGecko Demo plan key. Optional at the schema level (the API process doesn't need it until Stage 4); `worker.ts`, `seed:coins` and `job:poll-prices` each fail fast if it's missing                                                                                                                                                                                                                    |
-| `COINGECKO_BASE_URL`         | string                                  | No                          | `https://api.coingecko.com/api/v3`               | Demo-key root, not `pro-api`                                                                                                                                                                                                                                                                                                                                                                             |
-| `COINGECKO_TIMEOUT_MS`       | integer                                 | No                          | `10000`                                          | Per-attempt HTTP timeout                                                                                                                                                                                                                                                                                                                                                                                 |
-| `COINGECKO_MAX_RETRIES`      | integer                                 | No                          | `2`                                              | 0–5                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `COINGECKO_MAX_IDS_PER_CALL` | integer                                 | No                          | `50`                                             | 1–250                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `POLL_PRICES_CRON`           | cron expression                         | No                          | `*/10 * * * *`                                   | Validated with `cron.validate()`; runs in UTC                                                                                                                                                                                                                                                                                                                                                            |
-| `POLL_PRICES_RUN_ON_START`   | boolean                                 | No                          | `true`                                           | Also runs the job once (`trigger: "startup"`) when the worker boots                                                                                                                                                                                                                                                                                                                                      |
-| `SNAPSHOT_RETENTION_DAYS`    | integer \| empty                        | No                          | `90`                                             | TTL for `price_snapshots`; empty = no expiration                                                                                                                                                                                                                                                                                                                                                         |
-| `JOB_RUNS_RETENTION_DAYS`    | integer                                 | No                          | `30`                                             | TTL for `job_runs`                                                                                                                                                                                                                                                                                                                                                                                       |
-| `STALE_RUN_THRESHOLD_MIN`    | integer                                 | No                          | `15`                                             | A `running` `JobRun` older than this is recovered as `failed`/`STALE` on worker startup                                                                                                                                                                                                                                                                                                                  |
-| `WORKER_SHUTDOWN_TIMEOUT_MS` | integer                                 | No                          | `30000`                                          | Max time the worker waits for an in-progress run to finish during shutdown                                                                                                                                                                                                                                                                                                                               |
-| `TRUST_PROXY`                | integer                                 | No                          | `0` in `development`/`test`, `1` in `production` | Passed to Express's `app.set('trust proxy', ...)`; controls which hop the rate limiter trusts for the client IP when behind a reverse proxy                                                                                                                                                                                                                                                              |
-| `RATE_LIMIT_MAX`             | integer                                 | No                          | `300`                                            | Max requests per IP per `RATE_LIMIT_WINDOW_MIN` window, enforced on `/api` (not `/health`)                                                                                                                                                                                                                                                                                                               |
-| `RATE_LIMIT_WINDOW_MIN`      | integer                                 | No                          | `15`                                             | Rate-limit window length, in minutes                                                                                                                                                                                                                                                                                                                                                                     |
-| `STALE_POLL_THRESHOLD_MIN`   | integer                                 | No                          | `30`                                             | `GET /api/v1/status` reports `pollPrices.stale: true` when no `success`/`partial` `poll-prices` run finished within this many minutes                                                                                                                                                                                                                                                                    |
-| `FIREBASE_PROJECT_ID`        | string                                  | **Only without an emulator**| —                                                | Firebase project id. Required together with `FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` unless `FIREBASE_AUTH_EMULATOR_HOST` is set (`assertFirebaseCredentials`)                                                                                                                                                                                                                                     |
-| `FIREBASE_CLIENT_EMAIL`      | string                                  | **Only without an emulator**| —                                                | Service account client email, from the same JSON key as `FIREBASE_PRIVATE_KEY`                                                                                                                                                                                                                                                                                                                            |
-| `FIREBASE_PRIVATE_KEY`       | string (**secret**)                     | **Only without an emulator**| —                                                | Service account private key. Escaped `\n` sequences are normalized to real newlines at startup; never log or commit this value                                                                                                                                                                                                                                                                           |
-| `FIREBASE_WEB_API_KEY`       | string                                  | No                          | —                                                | Only used by the `auth:token` dev script to call the Identity Toolkit REST API; the API process itself never needs it. Optional when `FIREBASE_AUTH_EMULATOR_HOST` is set (the emulator ignores the key's value)                                                                                                                                                                                        |
-| `FIREBASE_AUTH_EMULATOR_HOST`| string                                  | No (dev only)                | —                                                | e.g. `127.0.0.1:9099`. Points both `firebase-admin` and the dev scripts at the local Auth emulator instead of a real Firebase project. The process refuses to start if this is set while `NODE_ENV=production` (E3-13)                                                                                                                                                                                  |
-| `USER_RATE_LIMIT_PER_MIN`    | integer                                 | No                          | `120`                                            | Per-`uid` request budget, enforced after `requireAuth` in addition to the global per-IP limiter                                                                                                                                                                                                                                                                                                           |
-| `LAST_SEEN_THROTTLE_MIN`     | integer                                 | No                          | `5`                                              | Minimum age of `lastSeenAt` before an authenticated request refreshes it                                                                                                                                                                                                                                                                                                                                  |
+| Variable                      | Type                                    | Required                     | Default                                          | Rules                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------- | --------------------------------------- | ---------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                    | `development` \| `test` \| `production` | No                           | `development`                                    | —                                                                                                                                                                                                                                                                                                                                              |
+| `PORT`                        | integer                                 | No                           | `3000`                                           | 1–65535                                                                                                                                                                                                                                                                                                                                        |
+| `MONGODB_URI`                 | string                                  | **Yes**                      | —                                                | Must start with `mongodb://` or `mongodb+srv://`                                                                                                                                                                                                                                                                                               |
+| `MONGODB_DB_NAME`             | string                                  | No                           | `crypto_tracker`                                 | Non-empty                                                                                                                                                                                                                                                                                                                                      |
+| `LOG_LEVEL`                   | pino level                              | No                           | `info`                                           | `fatal`\|`error`\|`warn`\|`info`\|`debug`\|`trace`\|`silent`                                                                                                                                                                                                                                                                                   |
+| `SHUTDOWN_TIMEOUT_MS`         | integer                                 | No                           | `10000`                                          | >= 1000                                                                                                                                                                                                                                                                                                                                        |
+| `COINGECKO_API_KEY`           | string                                  | **Yes**                      | —                                                | CoinGecko Demo plan key. Optional at the schema level (so `parseEnv` stays testable without it), but every entrypoint that can touch CoinGecko fails fast if it's missing: `worker.ts`, `seed:coins`, `job:poll-prices` and, since Stage 4, the API itself (`server.ts`) — its admin coin endpoints call CoinGecko to validate a `coingeckoId` |
+| `COINGECKO_BASE_URL`          | string                                  | No                           | `https://api.coingecko.com/api/v3`               | Demo-key root, not `pro-api`                                                                                                                                                                                                                                                                                                                   |
+| `COINGECKO_TIMEOUT_MS`        | integer                                 | No                           | `10000`                                          | Per-attempt HTTP timeout                                                                                                                                                                                                                                                                                                                       |
+| `COINGECKO_MAX_RETRIES`       | integer                                 | No                           | `2`                                              | 0–5                                                                                                                                                                                                                                                                                                                                            |
+| `COINGECKO_MAX_IDS_PER_CALL`  | integer                                 | No                           | `50`                                             | 1–250                                                                                                                                                                                                                                                                                                                                          |
+| `COINGECKO_READINESS_ENABLED` | boolean                                 | No                           | `false`                                          | Adds an optional `coingecko` entry to `GET /health/ready`. Disabled by default: an upstream CoinGecko outage should never take the API out of a deploy platform's rotation, since the read endpoints never call CoinGecko                                                                                                                      |
+| `POLL_PRICES_CRON`            | cron expression                         | No                           | `*/10 * * * *`                                   | Validated with `cron.validate()`; runs in UTC                                                                                                                                                                                                                                                                                                  |
+| `POLL_PRICES_RUN_ON_START`    | boolean                                 | No                           | `true`                                           | Also runs the job once (`trigger: "startup"`) when the worker boots                                                                                                                                                                                                                                                                            |
+| `SNAPSHOT_RETENTION_DAYS`     | integer \| empty                        | No                           | `90`                                             | TTL for `price_snapshots`; empty = no expiration                                                                                                                                                                                                                                                                                               |
+| `JOB_RUNS_RETENTION_DAYS`     | integer                                 | No                           | `30`                                             | TTL for `job_runs`                                                                                                                                                                                                                                                                                                                             |
+| `STALE_RUN_THRESHOLD_MIN`     | integer                                 | No                           | `15`                                             | A `running` `JobRun` older than this is recovered as `failed`/`STALE` on worker startup                                                                                                                                                                                                                                                        |
+| `WORKER_SHUTDOWN_TIMEOUT_MS`  | integer                                 | No                           | `30000`                                          | Max time the worker waits for an in-progress run to finish during shutdown                                                                                                                                                                                                                                                                     |
+| `TRUST_PROXY`                 | integer                                 | No                           | `0` in `development`/`test`, `1` in `production` | Passed to Express's `app.set('trust proxy', ...)`; controls which hop the rate limiter trusts for the client IP when behind a reverse proxy                                                                                                                                                                                                    |
+| `RATE_LIMIT_MAX`              | integer                                 | No                           | `300`                                            | Max requests per IP per `RATE_LIMIT_WINDOW_MIN` window, enforced on `/api` (not `/health`)                                                                                                                                                                                                                                                     |
+| `RATE_LIMIT_WINDOW_MIN`       | integer                                 | No                           | `15`                                             | Rate-limit window length, in minutes                                                                                                                                                                                                                                                                                                           |
+| `STALE_POLL_THRESHOLD_MIN`    | integer                                 | No                           | `30`                                             | `GET /api/v1/status` reports `pollPrices.stale: true` when no `success`/`partial` `poll-prices` run finished within this many minutes                                                                                                                                                                                                          |
+| `FIREBASE_PROJECT_ID`         | string                                  | **Only without an emulator** | —                                                | Firebase project id. Required together with `FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` unless `FIREBASE_AUTH_EMULATOR_HOST` is set (`assertFirebaseCredentials`)                                                                                                                                                                           |
+| `FIREBASE_CLIENT_EMAIL`       | string                                  | **Only without an emulator** | —                                                | Service account client email, from the same JSON key as `FIREBASE_PRIVATE_KEY`                                                                                                                                                                                                                                                                 |
+| `FIREBASE_PRIVATE_KEY`        | string (**secret**)                     | **Only without an emulator** | —                                                | Service account private key. Escaped `\n` sequences are normalized to real newlines at startup; never log or commit this value                                                                                                                                                                                                                 |
+| `FIREBASE_WEB_API_KEY`        | string                                  | No                           | —                                                | Only used by the `auth:token` dev script to call the Identity Toolkit REST API; the API process itself never needs it. Optional when `FIREBASE_AUTH_EMULATOR_HOST` is set (the emulator ignores the key's value)                                                                                                                               |
+| `FIREBASE_AUTH_EMULATOR_HOST` | string                                  | No (dev only)                | —                                                | e.g. `127.0.0.1:9099`. Points both `firebase-admin` and the dev scripts at the local Auth emulator instead of a real Firebase project. The process refuses to start if this is set while `NODE_ENV=production` (E3-13)                                                                                                                         |
+| `USER_RATE_LIMIT_PER_MIN`     | integer                                 | No                           | `120`                                            | Per-`uid` request budget, enforced after `requireAuth` in addition to the global per-IP limiter                                                                                                                                                                                                                                                |
+| `LAST_SEEN_THROTTLE_MIN`      | integer                                 | No                           | `5`                                              | Minimum age of `lastSeenAt` before an authenticated request refreshes it                                                                                                                                                                                                                                                                       |
+| `WATCHLIST_MAX_ITEMS`         | integer                                 | No                           | `50`                                             | Per-user cap on `watchlist_items` (spec watchlist-store). Checked before insert, not atomically — see "The watchlist item cap" below                                                                                                                                                                                                           |
 
 `src/config/env.ts` is the **only** module allowed to read `process.env` (enforced
 by an ESLint `no-restricted-properties` rule). Every other module imports the
@@ -126,27 +141,28 @@ endpoints (Stage 2)" below.
 
 ## npm scripts
 
-| Script                         | What it does                                                                                                                                                                                                     |
-| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm run dev`                  | API with auto-reload (`tsx watch src/server.ts`)                                                                                                                                                                 |
-| `npm run dev:worker`           | Worker with auto-reload (`tsx watch src/worker.ts`)                                                                                                                                                              |
-| `npm run build`                | Compiles `src/` to `dist/` with `tsc`                                                                                                                                                                            |
-| `npm start`                    | Runs the compiled API (`node dist/server.js`)                                                                                                                                                                    |
-| `npm run start:worker`         | Runs the compiled worker (`node dist/worker.js`)                                                                                                                                                                 |
-| `npm run typecheck`            | `tsc --noEmit`                                                                                                                                                                                                   |
-| `npm run lint`                 | ESLint                                                                                                                                                                                                           |
-| `npm run format`               | Prettier (writes changes)                                                                                                                                                                                        |
-| `npm test`                     | Runs the Vitest suite once                                                                                                                                                                                       |
-| `npm run test:watch`           | Vitest in watch mode                                                                                                                                                                                             |
-| `npm run test:coverage`        | Vitest with coverage report                                                                                                                                                                                      |
-| `npm run seed:coins`           | Upserts the tracked coin catalog from CoinGecko (Stage 1)                                                                                                                                                        |
-| `npm run job:poll-prices`      | Runs the `poll-prices` job exactly once, outside the scheduler (Stage 1)                                                                                                                                         |
-| `npm run coins:rebuild-latest` | Recomputes `coins.latest` for every coin from its newest `price_snapshots` document; idempotent, safe to run any time (Stage 2)                                                                                  |
-| `npm run backfill:history`     | Imports `price_snapshots` history for one coin from CoinGecko's `market_chart` endpoint: `npm run backfill:history -- <coingeckoId> --days <n>` (Stage 2, optional capability — see "Backfilling history" below) |
-| `npm run perf:coins-list`      | Seeds a local dataset and measures RNF-2.1 latency for `GET /api/v1/coins`, `.../history` and `.../stats` (Stage 2) — see "Performance (RNF-2.1)" below                                                          |
-| `npm run auth:create-test-user`| Creates a Firebase user with a verified email; `-- --email <e> --password <p> [--admin]` also provisions and promotes its Mongo profile to `role: "admin"` (Stage 3). Refuses to run with `NODE_ENV=production`  |
-| `npm run auth:token`           | Signs in with email/password against the Identity Toolkit REST API and prints **only** the ID token to stdout: `npm run auth:token -- --email <e> --password <p>` (Stage 3). Refuses to run with `NODE_ENV=production` |
-| `npm run user:set-role`        | Finds a user by email and sets its Mongo `role`: `npm run user:set-role -- --email <e> --role <user\|admin>` (Stage 3). Prints the previous → new role, or an actionable error if the user has no profile yet   |
+| Script                          | What it does                                                                                                                                                                                                           |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run dev`                   | API with auto-reload (`tsx watch src/server.ts`)                                                                                                                                                                       |
+| `npm run dev:worker`            | Worker with auto-reload (`tsx watch src/worker.ts`)                                                                                                                                                                    |
+| `npm run build`                 | Compiles `src/` to `dist/` with `tsc`                                                                                                                                                                                  |
+| `npm start`                     | Runs the compiled API (`node dist/server.js`)                                                                                                                                                                          |
+| `npm run start:worker`          | Runs the compiled worker (`node dist/worker.js`)                                                                                                                                                                       |
+| `npm run typecheck`             | `tsc --noEmit`                                                                                                                                                                                                         |
+| `npm run lint`                  | ESLint                                                                                                                                                                                                                 |
+| `npm run format`                | Prettier (writes changes)                                                                                                                                                                                              |
+| `npm test`                      | Runs the Vitest suite once                                                                                                                                                                                             |
+| `npm run test:watch`            | Vitest in watch mode                                                                                                                                                                                                   |
+| `npm run test:coverage`         | Vitest with coverage report                                                                                                                                                                                            |
+| `npm run seed:coins`            | Upserts the tracked coin catalog from CoinGecko (Stage 1)                                                                                                                                                              |
+| `npm run job:poll-prices`       | Runs the `poll-prices` job exactly once, outside the scheduler (Stage 1)                                                                                                                                               |
+| `npm run coins:rebuild-latest`  | Recomputes `coins.latest` for every coin from its newest `price_snapshots` document; idempotent, safe to run any time (Stage 2)                                                                                        |
+| `npm run backfill:history`      | Imports `price_snapshots` history for one coin from CoinGecko's `market_chart` endpoint: `npm run backfill:history -- <coingeckoId> --days <n>` (Stage 2, optional capability — see "Backfilling history" below)       |
+| `npm run perf:coins-list`       | Seeds a local dataset and measures RNF-2.1 latency for `GET /api/v1/coins`, `.../history` and `.../stats` (Stage 2) — see "Performance (RNF-2.1)" below                                                                |
+| `npm run auth:create-test-user` | Creates a Firebase user with a verified email; `-- --email <e> --password <p> [--admin]` also provisions and promotes its Mongo profile to `role: "admin"` (Stage 3). Refuses to run with `NODE_ENV=production`        |
+| `npm run auth:token`            | Signs in with email/password against the Identity Toolkit REST API and prints **only** the ID token to stdout: `npm run auth:token -- --email <e> --password <p>` (Stage 3). Refuses to run with `NODE_ENV=production` |
+| `npm run user:set-role`         | Finds a user by email and sets its Mongo `role`: `npm run user:set-role -- --email <e> --role <user\|admin>` (Stage 3). Prints the previous → new role, or an actionable error if the user has no profile yet          |
+| `npm run perf:watchlist`        | Seeds one user with 50 watchlist items and measures RNF-4.1 latency for `GET /api/v1/me/watchlist` (Stage 4) — see "Performance (RNF-4.1)" below                                                                       |
 
 ## Background worker (Stage 1)
 
@@ -155,9 +171,10 @@ CoinGecko for prices on a schedule and stores them as a time series. It needs
 its own API key and, before it has anything to poll, a seeded coin catalog.
 
 1. Get a free [CoinGecko Demo plan API key](https://www.coingecko.com/en/api/pricing)
-   and set `COINGECKO_API_KEY` in your `.env`. The API process does not need
-   this key (only Stage 4 will); `worker.ts`, `seed:coins` and
-   `job:poll-prices` each fail fast if it's missing.
+   and set `COINGECKO_API_KEY` in your `.env`. Since Stage 4 (watchlists),
+   the API process needs it too — its admin coin endpoints call CoinGecko;
+   `worker.ts`, `seed:coins`, `job:poll-prices` and `server.ts` each fail
+   fast if it's missing.
 2. Seed the coin catalog (idempotent — safe to run again):
 
    ```bash
@@ -565,6 +582,176 @@ X-Admin-Key: <your ADMIN_API_KEY>
 (not wrapped in `{ data, meta }`); `400 VALIDATION_ERROR` for a malformed id,
 `404 NOT_FOUND` for an unknown one.
 
+## API endpoints (Stage 4 — watchlists)
+
+All four watchlist routes require `Authorization: Bearer <Firebase ID token>`
+(`requireAuth()`, no `checkRevoked`) and share the per-uid rate limiter.
+`Cache-Control: private, no-cache` is set on the whole `/api/v1/me/watchlist`
+prefix — the response belongs to one user and must never end up in a shared
+cache.
+
+### `GET /api/v1/me/watchlist`
+
+Every item the authenticated user follows, joined with its coin's current
+`latest` projection via a `$match`/`$lookup`/`$unwind`/`$sort` aggregation.
+
+| Param   | Type                                              | Default                                                        | Notes |
+| ------- | ------------------------------------------------- | -------------------------------------------------------------- | ----- |
+| `sort`  | `addedAt` \| `name` \| `change24h` \| `marketCap` | `addedAt`                                                      |       |
+| `order` | `asc` \| `desc`                                   | `desc` for `addedAt`/`change24h`/`marketCap`, `asc` for `name` |       |
+
+```json
+{
+  "data": [
+    {
+      "coingeckoId": "bitcoin",
+      "symbol": "btc",
+      "name": "Bitcoin",
+      "isActive": true,
+      "note": "largo plazo",
+      "addedAt": "2026-09-16T21:00:00.000Z",
+      "latest": {
+        "priceUsd": 64210.12,
+        "marketCapUsd": 1265000000000,
+        "volume24hUsd": 25000000000,
+        "change24hPct": -1.23,
+        "capturedAt": "2026-09-23T12:00:00.000Z"
+      }
+    }
+  ],
+  "meta": { "count": 1, "max": 50 }
+}
+```
+
+No item ever carries `userId`, `_id` or `__v` (RNF-4.3): a watchlist item is
+identified by its `coingeckoId` within the caller's own list. A coin the
+admin later deactivates stays listed with `isActive: false` and its last
+known `latest` — the polling job simply stops advancing it (see `PATCH
+/api/v1/admin/coins/:coingeckoId` below).
+
+**The listing is deliberately unpaginated.** There is no `page`/`limit`
+query parameter, and every matching item is returned in one response. This
+is safe _only_ because `WATCHLIST_MAX_ITEMS` bounds the result size — if
+that cap were ever raised substantially, pagination would have to be
+reintroduced alongside it. `meta.max` always echoes the configured cap so a
+client can tell how close a user is to it.
+
+### `POST /api/v1/me/watchlist`
+
+Strict body `{ coingeckoId: string, note?: string | null }`. Validations run
+in this **fixed order**, never reordered:
+
+1. Body shape → `400 VALIDATION_ERROR`.
+2. The coin exists and is active → `404 NOT_FOUND` otherwise (an inactive or
+   unknown coin looks identical from the outside on purpose).
+3. Current item count is below `WATCHLIST_MAX_ITEMS` → `422 UNPROCESSABLE`
+   with `details: { reason: "LIMIT_REACHED" }` otherwise.
+4. Insertion. A duplicate `{ userId, coinId }` (`E11000` from the unique
+   index) becomes `409 CONFLICT`.
+
+On success: `201` with the item in the same shape `GET` uses, plus a
+`Location: /api/v1/me/watchlist/<coingeckoId>` header.
+
+**The watchlist item cap is checked non-atomically.** Step 3 counts, then
+step 4 inserts — two separate round trips. Two concurrent `POST` requests
+from the same user can both read the count below the cap and both insert,
+leaving the user with `WATCHLIST_MAX_ITEMS + 1` items. This is an accepted,
+documented limitation (design.md), not a bug: the overshoot is bounded by
+the number of truly simultaneous requests, self-corrects the moment the user
+removes anything, and has no consequence beyond a slightly longer list. The
+strictly atomic alternative — a counter on the `users` document updated with
+a conditional `$inc` — was considered and rejected for now because it adds a
+second source of truth for the item count and a reconciliation problem of
+its own; see design.md's Open Questions if that trade-off ever needs
+revisiting.
+
+### `PATCH /api/v1/me/watchlist/:coingeckoId`
+
+Strict body `{ note: string | null }` (required — an empty body is
+`400 VALIDATION_ERROR`, unlike `POST` where `note` is optional). Resolves the
+coin by `coingeckoId` **whether it is active or not** — editing the note of a
+coin you already follow costs nothing and shouldn't be blocked just because
+an admin later deactivated it. `404 NOT_FOUND` when the caller doesn't
+follow that coin at all.
+
+### `DELETE /api/v1/me/watchlist/:coingeckoId`
+
+Always `204`, even when the item didn't exist or the `coingeckoId` matches no
+coin at all — `DELETE` is idempotent by definition, and the postcondition
+("this coin is not in your watchlist") already holds either way. Only a
+`coingeckoId` that fails the id pattern is `400 VALIDATION_ERROR`.
+
+### Coin id normalization
+
+Both `PATCH` and `DELETE` lowercase their `:coingeckoId` path parameter
+_before_ validating it against the pattern, so `/watchlist/Bitcoin` resolves
+exactly like `/watchlist/bitcoin`. `POST`'s body `coingeckoId` is **not**
+normalized this way — an uppercase value simply matches no stored coin
+(always lowercase) and resolves to the same `404` as an unknown id.
+
+### Isolation between users (RF-4.5 / spec user-data-isolation)
+
+Every watchlist query is scoped by the authenticated user's `_id`; no route
+in this module ever reads a `userId` from a request body, query string or
+path parameter (a client-supplied `userId` field is simply rejected by the
+strict body schema, same as any other unknown field). Every watchlist
+service function takes `userId` as an explicit first parameter rather than
+reading it from ambient request state — a service that forgot to scope its
+query would have an unused argument sitting right there, not silent ambient
+state.
+
+### `GET /api/v1/admin/coins`, `POST /api/v1/admin/coins` and `PATCH /api/v1/admin/coins/:coingeckoId`
+
+Same admin guard as `/api/v1/admin/job-runs` above
+(`requireAuth({ checkRevoked: true })` + `requireRole('admin')`,
+`Cache-Control: no-store`).
+
+- **`GET`** — paginated (`page`/`limit`, same shape as `GET /api/v1/coins`),
+  includes **inactive** coins (unlike the public read API), takes an optional
+  `isActive=true|false` filter, and each entry carries `watchersCount` — how
+  many `watchlist_items` reference it, computed with a `$group` restricted to
+  the coins on the current page only (never the whole catalog).
+- **`POST`** — strict body `{ coingeckoId }`. Validates against CoinGecko
+  with `getMarkets([id])` **before writing anything**: an id CoinGecko
+  doesn't recognize is `422` with `details: { reason: "UNKNOWN_COINGECKO_ID" }`,
+  and a failed CoinGecko call itself is `502 UPSTREAM_ERROR`. If the coin
+  doesn't exist yet, it's created active (`201`); if it exists but is
+  inactive, it's reactivated (`200`); if it's already active, `409
+CONFLICT`. Both create and reactivate refresh `name`/`symbol` from
+  CoinGecko. **Each successful call consumes one CoinGecko API call** against
+  the monthly quota — see "CoinGecko quota" above.
+- **`PATCH`** — strict body `{ isActive: boolean }`, `200` with the coin and
+  its `watchersCount` (so the admin can see how many users are affected by a
+  deactivation before/after doing it). Deactivating a coin makes the next
+  `poll-prices` run skip it (it only queries `findActive()`), while its
+  `price_snapshots` history and any `watchlist_items` referencing it are left
+  untouched.
+
+Every admin coin create, reactivate and activation-toggle is logged at
+`info`, naming the acting admin's `userId`.
+
+**There is no `DELETE` for coins, on purpose.** Deleting a coin document
+would orphan every `watchlist_items` row referencing it and strand its
+`price_snapshots` history in a time series nothing points at anymore. Soft
+deactivation (`PATCH { isActive: false }`) keeps the history queryable and
+every reference valid, and it's fully reversible: `POST` with an existing
+inactive id reactivates it. A `DELETE` request against an admin coin path
+simply falls through to the global `404` handler — no such route is
+registered.
+
+### Account deletion cascade
+
+`DELETE /api/v1/me` (see above) now delegates to
+`usersService.deleteAccount(userId)`, which deletes the user's
+`watchlist_items` **before** the `users` document itself — never the other
+way around, so an interruption mid-delete can never leave orphaned items
+whose owner no longer exists. The cascade is safe to re-run: both deletes are
+plain `deleteMany`/`deleteOne` calls, which are no-ops (not errors) against
+documents that are already gone. `usersService` never queries
+`watchlist_items` directly — it calls the watchlist module's own deletion
+function, so a later stage (alerts, notifications) extends the cascade by
+adding one more call, never by learning another module's schema.
+
 ### Rate limiting
 
 The global limiter (`src/middlewares/rateLimiter.ts`) is mounted on `/api`
@@ -645,6 +832,38 @@ aggregation pipeline over an indexed time-series range (history/stats), never
 an in-Node scan. Re-run `npm run perf:coins-list` to reproduce; numbers vary
 with hardware.
 
+### Performance (RNF-4.1)
+
+`npm run perf:watchlist` (tarea 8.4) seeds one user with `WATCHLIST_MAX_ITEMS`
+(50) watchlist items, each joined to its own active coin with a populated
+`latest`, then measures p50/p95/p99 latency for `GET /api/v1/me/watchlist` —
+the only endpoint RNF-4.1 sets a budget for. Same approach as
+`perf:coins-list`: `mongodb-memory-server` + `supertest` in the same process.
+
+Measured locally (Windows, Node 22, MongoDB 8 via `mongodb-memory-server`):
+
+| Endpoint                              | RNF-4.1 target (p95) | Measured p50 | Measured p95 | Measured p99 | Result   |
+| ------------------------------------- | -------------------- | ------------ | ------------ | ------------ | -------- |
+| `GET /api/v1/me/watchlist` (50 items) | < 50 ms              | 10.35 ms     | 12.47 ms     | 15.04 ms     | **PASS** |
+
+Comfortably under budget — the aggregation matches on the indexed `userId`
+prefix of `{ userId: 1, addedAt: -1 }` and `$lookup`s at most 50 documents by
+`coins._id`, the primary key (see "RNF-4.2" below). Re-run `npm run
+perf:watchlist` to reproduce; numbers vary with hardware.
+
+### RNF-4.2 — the watchlist listing query uses an index, never a collection scan
+
+`tests/integration/watchlistApi.test.ts`'s `RNF-4.2: the listing aggregation
+uses an IXSCAN on { userId: 1, addedAt: -1 }, never a COLLSCAN` test runs the
+exact `$match`/`$lookup`/`$unwind`/`$sort` aggregation `GET
+/api/v1/me/watchlist` uses (with the default `sort=addedAt`) through
+`.explain('executionStats')` and asserts the plan contains `IXSCAN` on the
+`userId_1_addedAt_-1` index and never a `COLLSCAN`. The `{ userId: 1,
+addedAt: -1 }` compound index (defined in `watchlist.model.ts`) serves the
+`$match: { userId }` stage that opens the pipeline, so the join and sort that
+follow only ever run over one user's own (at most `WATCHLIST_MAX_ITEMS`)
+documents.
+
 ### Backfilling history (optional, RF-2.11)
 
 `npm run backfill:history -- <coingeckoId> --days <n>` imports historical
@@ -683,7 +902,7 @@ to solve (spec auth-dev-scripts). Two setups work:
 ### Option B — the local Auth emulator (no real Firebase project needed)
 
 1. Install the [Firebase CLI](https://firebase.google.com/docs/cli) (`npm
-   install -g firebase-tools`) and a Java runtime — the emulator suite
+install -g firebase-tools`) and a Java runtime — the emulator suite
    requires **JDK 11 or higher** ([Firebase's own prerequisites](https://firebase.google.com/docs/emulator-suite/install_and_configure)).
 2. Start only the Auth emulator:
 
@@ -692,6 +911,7 @@ to solve (spec auth-dev-scripts). Two setups work:
    ```
 
    By default it listens on `127.0.0.1:9099`.
+
 3. Set in `.env`:
 
    ```
