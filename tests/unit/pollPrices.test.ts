@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
 import type { Logger } from 'pino';
-import { createPollPricesJob } from '../../src/jobs/pollPrices.js';
+import { createPollPricesJob as createRealPollPricesJob } from '../../src/jobs/pollPrices.js';
+import type { CreatePollPricesJobDeps, PollPricesJob } from '../../src/jobs/pollPrices.js';
 import type {
   ActiveCoin,
   CoinsRepo,
@@ -35,7 +36,7 @@ function createFakeLogger(): Logger {
 }
 
 function activeCoin(coingeckoId: string): ActiveCoin {
-  return { id: new Types.ObjectId(), coingeckoId };
+  return { id: new Types.ObjectId(), coingeckoId, name: coingeckoId, symbol: coingeckoId.slice(0, 3) };
 }
 
 function simplePrice(overrides: Partial<SimplePrice> = {}): SimplePrice {
@@ -116,6 +117,29 @@ function createFakeSnapshotsRepo(
       return docs.length;
     },
   };
+}
+
+/**
+ * Wrapper de `createPollPricesJob` para este archivo: por defecto overridea
+ * `evaluateAlerts` con un fake que nunca toca Mongo (`AlertModel` necesita
+ * una conexión real, que estos tests unitarios — a diferencia de
+ * `tests/integration/alertEvaluation.test.ts` — nunca levantan). Ningún test
+ * de este archivo es sobre evaluación de alertas, así que el fake solo
+ * devuelve estadísticas en cero.
+ */
+function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJob {
+  return createRealPollPricesJob({
+    evaluateAlerts: async () => ({
+      stats: {
+        alertsEvaluated: 0,
+        alertsTriggered: 0,
+        alertsRearmed: 0,
+        alertsInCooldown: 0,
+        triggerConflicts: 0,
+      },
+    }),
+    ...deps,
+  });
 }
 
 function createFakeJobRunsRepo(): JobRunsRepo & {

@@ -6,8 +6,9 @@ coins, history and stats. See `requerimientos/00-indice-y-convenciones.md` for t
 full project index and conventions, `requerimientos/01-etapa-0-setup-base.md` for
 Stage 0's requirements, `requerimientos/02-etapa-1-primer-job.md` for Stage 1's
 requirements, `requerimientos/03-etapa-2-api-rest.md` for Stage 2's requirements,
-`requerimientos/04-etapa-3-auth-firebase.md` for Stage 3's requirements, and
-`requerimientos/05-etapa-4-watchlists.md` for this stage's detailed requirements.
+`requerimientos/04-etapa-3-auth-firebase.md` for Stage 3's requirements,
+`requerimientos/05-etapa-4-watchlists.md` for Stage 4's requirements, and
+`requerimientos/06-etapa-5-alertas-email.md` for this stage's detailed requirements.
 
 Stage 0 ("base setup") provided the base Express/TypeScript service: startup,
 config validation, MongoDB connection, health checks, a single error format, and
@@ -50,6 +51,25 @@ watchlist first, and makes `COINGECKO_API_KEY` required for the API process
 too (previously only the worker/scripts needed it). See "API endpoints
 (Stage 4 — watchlists)" below for the full contract.
 
+**Stage 5 ("alertas-email")** closes the loop: the worker now acts on what it
+collects instead of only recording it. A user defines a price or 24h-change
+condition on a coin (`GET`/`POST /api/v1/me/alerts`,
+`GET`/`PATCH`/`DELETE /api/v1/me/alerts/:id`), the worker evaluates every
+`armed` alert as the final step of each `poll-prices` run, and a trigger
+writes a `notifications` outbox row in the same transaction that flips the
+alert. A second scheduled job (`send-notifications`) claims and sends those
+notifications over SMTP with retry and backoff, so the price-collecting job
+never talks to a mail server directly. Users read their own history at
+`GET /api/v1/me/notifications`; admins get full diagnostic detail and two
+extra operations at `GET /api/v1/admin/notifications`,
+`POST /api/v1/admin/notifications/:id/retry` and
+`POST /api/v1/admin/notifications/test-email`. This stage also makes MongoDB
+run as a replica set — required for the multi-document transaction the
+trigger uses — and routes all outgoing mail to a local Mailpit instance
+instead of a production provider. See "API endpoints (Stage 5 — alerts &
+notifications)" below for the full contract and "Known limitations" for the
+trade-offs this stage accepts deliberately.
+
 ## Requirements
 
 - Node.js **24.x** (see `.node-version`). `engines.node` in `package.json` enforces
@@ -78,10 +98,11 @@ too (previously only the worker/scripts needed it). See "API endpoints
    docker compose up -d
    ```
 
-   This starts a single-node MongoDB 8 instance on `localhost:27017`, with data
-   persisted in a named volume (`mongo_data`). See the comment inside
-   `docker-compose.yml` for how to switch it to a one-node replica set (required
-   starting from stage 5, for transactions).
+   This starts a single-node MongoDB 8 replica set (`rs0`) on `localhost:27017`
+   — required from stage 5 onward, since transactions need a replica set — with
+   data persisted in a named volume (`mongo_data`), plus a `mailpit` service for
+   local email capture (see below). Point `MONGODB_URI` at
+   `mongodb://localhost:27017/?replicaSet=rs0&directConnection=true`.
 
 4. Run the API in development mode (auto-reload on file changes):
 
@@ -126,6 +147,19 @@ too (previously only the worker/scripts needed it). See "API endpoints
 | `USER_RATE_LIMIT_PER_MIN`     | integer                                 | No                           | `120`                                            | Per-`uid` request budget, enforced after `requireAuth` in addition to the global per-IP limiter                                                                                                                                                                                                                                                |
 | `LAST_SEEN_THROTTLE_MIN`      | integer                                 | No                           | `5`                                              | Minimum age of `lastSeenAt` before an authenticated request refreshes it                                                                                                                                                                                                                                                                       |
 | `WATCHLIST_MAX_ITEMS`         | integer                                 | No                           | `50`                                             | Per-user cap on `watchlist_items` (spec watchlist-store). Checked before insert, not atomically — see "The watchlist item cap" below                                                                                                                                                                                                           |
+| `SMTP_HOST`                   | string                                  | **Only for the worker**      | —                                                | Optional at the schema level (same reason as `COINGECKO_API_KEY`), but the worker fails fast if missing, together with `MAIL_FROM` (`assertSmtpCredentials`) — the API process never sends mail, so it never requires it. `localhost` for local Mailpit                                                                                     |
+| `SMTP_PORT`                   | integer                                 | No                           | `587`                                            | 1–65535. `1025` for local Mailpit                                                                                                                                                                                                                                                                                                                |
+| `SMTP_USER`                   | string                                  | No                           | —                                                | Local Mailpit needs no authentication, so this stays empty in development                                                                                                                                                                                                                                                                       |
+| `SMTP_PASS`                   | string (**secret**)                     | No                           | —                                                | Same as `SMTP_USER` — empty against local Mailpit                                                                                                                                                                                                                                                                                                |
+| `MAIL_FROM`                   | string                                  | **Only for the worker**      | —                                                | Required together with `SMTP_HOST` in the worker (`assertSmtpCredentials`). Stays a documented placeholder value — never a real production sender, see "The Mailpit local workflow" below                                                                                                                                                    |
+| `MAIL_DISPLAY_TIMEZONE`       | string                                  | No                           | `America/Argentina/Buenos_Aires`                 | IANA timezone shown in the email body alongside the UTC timestamp that's always included too                                                                                                                                                                                                                                                    |
+| `MAIL_MAX_PER_MINUTE`         | integer                                 | No                           | `30`                                              | Caps how many notifications `send-notifications` sends per run; the rest wait for the next run                                                                                                                                                                                                                                                  |
+| `ALERTS_MAX_ACTIVE`           | integer                                 | No                           | `20`                                              | Per-user cap on alerts in `armed`+`triggered` (spec alert-store); enforced on creation and on re-enabling a disabled alert                                                                                                                                                                                                                      |
+| `SEND_NOTIFICATIONS_CRON`     | cron expression                         | No                           | `* * * * *`                                      | Validated with `cron.validate()` at worker startup; runs in UTC                                                                                                                                                                                                                                                                                  |
+| `NOTIFY_BATCH_SIZE`           | integer                                 | No                           | `20`                                              | Notifications claimed per `send-notifications` run                                                                                                                                                                                                                                                                                               |
+| `NOTIFY_MAX_ATTEMPTS`         | integer                                 | No                           | `5`                                               | Attempts allowed before a transient failure becomes permanently `failed`                                                                                                                                                                                                                                                                         |
+| `NOTIFY_LOCK_TIMEOUT_MIN`     | integer                                 | No                           | `10`                                              | Age after which a `sending` lock is considered stale and recovered by another run; also the bound on the at-least-once duplicate window — see "Known limitations" below                                                                                                                                                                        |
+| `NOTIFICATIONS_RETENTION_DAYS`| integer                                 | No                           | `90`                                              | TTL for the `notifications` collection                                                                                                                                                                                                                                                                                                            |
 
 `src/config/env.ts` is the **only** module allowed to read `process.env` (enforced
 by an ESLint `no-restricted-properties` rule). Every other module imports the
@@ -163,18 +197,36 @@ endpoints (Stage 2)" below.
 | `npm run auth:token`            | Signs in with email/password against the Identity Toolkit REST API and prints **only** the ID token to stdout: `npm run auth:token -- --email <e> --password <p>` (Stage 3). Refuses to run with `NODE_ENV=production` |
 | `npm run user:set-role`         | Finds a user by email and sets its Mongo `role`: `npm run user:set-role -- --email <e> --role <user\|admin>` (Stage 3). Prints the previous → new role, or an actionable error if the user has no profile yet          |
 | `npm run perf:watchlist`        | Seeds one user with 50 watchlist items and measures RNF-4.1 latency for `GET /api/v1/me/watchlist` (Stage 4) — see "Performance (RNF-4.1)" below                                                                       |
+| `npm run perf:alerts-evaluation`| Seeds 1,000 alerts across 10 coins (none triggering) and measures RNF-5.1 latency for `evaluateAlerts`, the alert-evaluation step inside `poll-prices` (Stage 5) — see "Performance (RNF-5.1)" below                    |
 
 ## Background worker (Stage 1)
 
-The worker (`src/worker.ts`) is a **separate process** from the API — it polls
-CoinGecko for prices on a schedule and stores them as a time series. It needs
-its own API key and, before it has anything to poll, a seeded coin catalog.
+The worker (`src/worker.ts`) is a **separate process** from the API. Since
+Stage 5 (alertas-email) it schedules **two** independent jobs, each with its
+own cron expression and its own in-memory overlap guard — an overlap on one
+never blocks or gets confused with the other's:
+
+- **`poll-prices`** — polls CoinGecko for prices on a schedule and stores
+  them as a time series, then evaluates every `armed` alert against the
+  coins that just updated (see "API endpoints (Stage 5 — alerts &
+  notifications)" below).
+- **`send-notifications`** — claims and sends any `pending` notification the
+  evaluation step queued, over SMTP, with retry and backoff. `poll-prices`
+  also triggers it immediately (fire-and-forget, through its own overlap
+  guard) whenever a run causes at least one alert to fire, instead of
+  waiting for its own next tick.
+
+It needs its own CoinGecko API key, valid SMTP settings and, before it has
+anything to poll, a seeded coin catalog.
 
 1. Get a free [CoinGecko Demo plan API key](https://www.coingecko.com/en/api/pricing)
    and set `COINGECKO_API_KEY` in your `.env`. Since Stage 4 (watchlists),
    the API process needs it too — its admin coin endpoints call CoinGecko;
    `worker.ts`, `seed:coins`, `job:poll-prices` and `server.ts` each fail
-   fast if it's missing.
+   fast if it's missing. Since Stage 5, the worker also fails fast if
+   `SMTP_HOST`/`MAIL_FROM` are missing (`assertSmtpCredentials`) — set them
+   to `localhost`/a placeholder address for local Mailpit (see "The Mailpit
+   local workflow" below).
 2. Seed the coin catalog (idempotent — safe to run again):
 
    ```bash
@@ -189,10 +241,14 @@ its own API key and, before it has anything to poll, a seeded coin catalog.
    npm run dev:worker
    ```
 
-   On success you should see a startup log with `workerId`, the cron
-   expression, and the active coin count, followed by one `poll-prices` run
+   On success you should see a startup log with `workerId`, both cron
+   expressions (`pollPricesCron`, `sendNotificationsCron`), and the active
+   coin count, followed by one `poll-prices` run
    (`POLL_PRICES_RUN_ON_START` defaults to `true`) and then one run every
    `POLL_PRICES_CRON` interval (default: every 10 minutes, UTC).
+   `send-notifications` starts on its own schedule right away
+   (`SEND_NOTIFICATIONS_CRON` default: every minute, UTC) — it simply finds
+   nothing `pending` to claim until an alert actually triggers.
 
 4. To run the job once without the scheduler:
 
@@ -221,6 +277,16 @@ With the defaults (10 coins, `POLL_PRICES_CRON` every 10 minutes), that's
 ≈ 4,464 calls/month from the scheduler alone — comfortably under the cap, but
 leave headroom for `seed:coins` runs and manual `job:poll-prices` executions
 when budgeting a shorter interval or a larger coin list.
+
+**Since Stage 5, this quota is no longer the binding constraint on polling
+frequency for this project.** The worker here is only ever started to test
+or develop against, never run continuously in production, so it can't
+realistically approach 10,000 calls/month regardless of interval. The
+batching, retry caps and interval defaults documented above stay exactly as
+they are — this is a relaxation of what limits polling frequency during
+development, not a removal of the guidance itself; a deployment that did run
+the worker continuously would still need to budget against the real quota
+the same way.
 
 ## Running tests
 
@@ -883,6 +949,288 @@ imported vs. skipped, and prompts for confirmation before running (`--yes`/
 `--force` to skip the prompt) since it consumes one call from CoinGecko's
 monthly quota per invocation.
 
+## API endpoints (Stage 5 — alerts & notifications)
+
+All five `/api/v1/me/alerts` routes and `GET /api/v1/me/notifications` require
+`Authorization: Bearer <Firebase ID token>` (`requireAuth()`, no
+`checkRevoked`) and share the per-uid rate limiter. `Cache-Control: private,
+no-cache` is set on both prefixes, same as the watchlist routes — these
+responses belong to one user and must never end up in a shared cache. The
+three `/api/v1/admin/notifications` routes share the same admin guard as
+`/api/v1/admin/job-runs` and `/api/v1/admin/coins`
+(`requireAuth({ checkRevoked: true })` + `requireRole('admin')`,
+`Cache-Control: no-store`).
+
+### `GET /api/v1/me/alerts`
+
+Every alert the authenticated user owns, paginated and ordered by `createdAt`
+descending, each carrying its coin's identity and current `latest` values.
+
+| Param         | Type            | Default | Notes                                              |
+| ------------- | --------------- | ------- | --------------------------------------------------- |
+| `status`      | comma-separated | —       | One or more of `armed`, `triggered`, `completed`, `disabled` |
+| `coingeckoId` | string          | —       | Filters to one coin                                |
+| `page`        | integer ≥ 1     | `1`     |                                                     |
+| `limit`       | integer 1–100   | `20`    |                                                     |
+
+```json
+{
+  "data": [
+    {
+      "id": "651f1c2e8b1e2a0012a3b789",
+      "coingeckoId": "bitcoin",
+      "type": "PRICE_BELOW",
+      "threshold": 50000,
+      "mode": "recurring",
+      "status": "armed",
+      "cooldownMinutes": 60,
+      "rearmPct": 1,
+      "note": "largo plazo",
+      "version": 0,
+      "triggerCount": 0,
+      "lastTriggeredAt": null,
+      "lastTriggeredValue": null,
+      "lastEvaluatedAt": null,
+      "createdAt": "2026-09-23T12:00:00.000Z",
+      "updatedAt": "2026-09-23T12:00:00.000Z",
+      "coin": {
+        "symbol": "btc",
+        "name": "Bitcoin",
+        "isActive": true,
+        "latest": { "priceUsd": 64210.12, "change24hPct": -1.23 }
+      }
+    }
+  ],
+  "meta": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 }
+}
+```
+
+### `POST /api/v1/me/alerts`
+
+Strict body `{ coingeckoId, type, threshold, mode?, cooldownMinutes?, rearmPct?, note? }`.
+`type` is one of `PRICE_ABOVE`, `PRICE_BELOW` or `CHANGE_24H_ABS_GTE`, and the
+valid range of `threshold` depends on it: `PRICE_ABOVE`/`PRICE_BELOW` accept
+any value `> 0` and `<= 1e9`; `CHANGE_24H_ABS_GTE` accepts `0.1`–`100`
+(percentage points). `mode` defaults to `recurring` (the alternative,
+`once`, is accepted by the schema but evaluation still treats every alert
+the same way — see `alert-evaluation`'s spec for the exact rearm/cooldown
+rules that apply regardless of `mode`). Validations run in this **fixed
+order**, never reordered:
+
+1. Body shape → `400 VALIDATION_ERROR`.
+2. The caller has a verified email → `422 UNPROCESSABLE` with
+   `details.reason: "EMAIL_NOT_VERIFIED"` otherwise — the recipient is
+   always the account's own verified email, never a client-supplied
+   address.
+3. The coin exists and is active → `404 NOT_FOUND` otherwise.
+4. The caller's active-alert count (`armed` + `triggered`) is below
+   `ALERTS_MAX_ACTIVE` → `422 UNPROCESSABLE` with
+   `details.reason: "LIMIT_REACHED"` otherwise.
+
+On success: `201` with the alert in the same shape `GET` uses, plus a
+`Location: /api/v1/me/alerts/<id>` header and a `meta` block reporting the
+coin's current value and whether the condition is already met:
+
+```json
+{
+  "data": { "id": "651f1c2e8b1e2a0012a3b789", "coingeckoId": "bitcoin", "type": "PRICE_BELOW", "threshold": 70000, "status": "armed", "...": "..." },
+  "meta": { "currentValue": 64210.12, "conditionCurrentlyMet": true }
+}
+```
+
+**The alert is never evaluated during the creation request itself** — it is
+always created `armed`, even when `meta.conditionCurrentlyMet` is `true`. It
+fires on the next `poll-prices` run that evaluates it, same as any other
+alert.
+
+### `GET /api/v1/me/alerts/:id`
+
+`400 VALIDATION_ERROR` when `id` is not a valid ObjectId; `404 NOT_FOUND`
+both when the alert doesn't exist and when it belongs to another user — the
+response never reveals which case it is, same rule the watchlist and
+job-runs endpoints already follow.
+
+### `PATCH /api/v1/me/alerts/:id`
+
+Strict body `{ threshold?, cooldownMinutes?, rearmPct?, note?, mode?, enabled? }`
+with at least one field present. `type` is **not** a key of this schema at
+all — `.strict()` already rejects a body that includes it with
+`400 VALIDATION_ERROR`, the same mechanism `POST /api/v1/me/watchlist/:coingeckoId`
+uses to keep `coingeckoId` out of its own body.
+
+- **`enabled: false`** moves the alert to `disabled`, whatever its current
+  status.
+- **`enabled: true`** from `disabled` or `completed` moves it to `armed`
+  and counts toward `ALERTS_MAX_ACTIVE` — `422 UNPROCESSABLE` with
+  `details.reason: "LIMIT_REACHED"` if the caller is already at the cap.
+- **Changing `threshold` on a `triggered` alert re-arms it**: its status
+  becomes `armed` again, while `lastTriggeredAt` and `triggerCount` keep
+  their previous values — the alert's trigger history isn't reset just
+  because the condition that will fire it next changed.
+- Every modification is an `updateOne({ _id, userId }, { $set: ..., $inc: { version: 1 } })`,
+  so an evaluation run holding the alert's previous `version` fails to match
+  and simply re-reads it on the next tick (see "Optimistic concurrency" in
+  `design.md`).
+
+`404 NOT_FOUND` for another user's alert or an unknown id, same rule as `GET`.
+
+### `DELETE /api/v1/me/alerts/:id`
+
+Deletes the alert and moves any of its `pending` notifications to
+`cancelled`, leaving one already `sending` to finish — deleting the alert
+mid-send doesn't yank back an email that's already in flight. Always `204`,
+including when the alert doesn't exist or belongs to another user, in which
+case nothing is deleted (same idempotent-`DELETE` rule as the watchlist).
+
+### `GET /api/v1/me/notifications`
+
+The authenticated user's own notification history.
+
+| Param    | Type                                                | Default | Notes |
+| -------- | ---------------------------------------------------- | ------- | ----- |
+| `status` | `pending`\|`sending`\|`sent`\|`failed`\|`cancelled`   | —       | Single value, unlike `alerts`' comma-separated `status` |
+| `page`   | integer ≥ 1                                          | `1`     |       |
+| `limit`  | integer 1–100                                        | `20`    |       |
+
+```json
+{
+  "data": [
+    {
+      "id": "651f1c2e8b1e2a0012a3b900",
+      "alertId": "651f1c2e8b1e2a0012a3b789",
+      "status": "failed",
+      "to": "ni***@gmail.com",
+      "payload": {
+        "coingeckoId": "bitcoin",
+        "coinName": "Bitcoin",
+        "symbol": "btc",
+        "alertType": "PRICE_BELOW",
+        "threshold": 70000,
+        "value": 64210.12,
+        "priceUsd": 64210.12,
+        "change24hPct": -1.23,
+        "triggeredAt": "2026-09-23T12:10:00.000Z",
+        "note": "largo plazo"
+      },
+      "attempts": 5,
+      "sentAt": null,
+      "createdAt": "2026-09-23T12:10:00.000Z",
+      "lastError": { "code": "SMTP_UNAVAILABLE" }
+    }
+  ],
+  "meta": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 }
+}
+```
+
+`to` is always masked (never the full address); `lockedBy`, `dedupeKey` and
+`lastError.message`/`.permanent` are never present — when a notification
+failed, only `lastError.code` is shown. The full diagnostic detail exists
+only in the admin listing below.
+
+### `GET`, `POST /api/v1/admin/notifications/:id/retry`, `POST /api/v1/admin/notifications/test-email`
+
+Admin-only (see the guard note above). `GET` accepts `status`, `userId`,
+`from`/`to` and `page`/`limit`, and returns the **same** shape as the user
+listing plus the full `lastError` object (`code`, `message`, `permanent`)
+and `lockedBy` — the extra fields a user is never shown.
+
+`POST /:id/retry` requeues a `failed` notification: `status: "pending"`,
+`attempts: 0`, `nextAttemptAt: now`, `lastError: null`, done as one atomic
+conditional `findOneAndUpdate` rather than a read-then-write. When that
+match fails, a **second, distinct check decides the response**: an unknown
+`id` is `404 NOT_FOUND`, while an id that exists but isn't `failed` (e.g.
+already `sent`) is `409 CONFLICT` — the spec only defines `failed → pending`
+as success and any other status as a conflict, so a missing document is
+treated as "not found" rather than folded into that same 409.
+
+`POST /test-email` sends a fixed test message immediately to the calling
+admin's **own** email — never a client-supplied address — and creates **no**
+`notifications` document at all: it bypasses the outbox entirely, so it's
+useful for confirming SMTP connectivity without waiting on a real alert.
+`200` with `{ data: { messageId } }` on success; `502 UPSTREAM_ERROR` with
+the mailer's own error code (`SMTP_REJECTED`/`SMTP_UNAVAILABLE`) in
+`details.reason` when the send itself fails.
+
+### The replica-set requirement
+
+Alert triggers need a real multi-document transaction (flipping the alert to
+`triggered` and inserting its notification atomically), and MongoDB only
+supports transactions against a replica set. **Both the API and the worker
+verify replica-set support at startup and exit with code `1` and an
+explanatory log line if it isn't satisfied** — this fails fast and legibly
+at boot rather than obscurely on the first trigger. `docker compose up`
+already gives you a working single-node set (see "Getting started" above);
+if you're pointing at your own MongoDB instance instead, it needs to be
+initialized as a replica set too.
+
+### The Mailpit local workflow
+
+Every email this project sends goes to **Mailpit**, a local SMTP sink
+started by `docker compose up` — nothing ever reaches a real inbox. View
+everything the worker has sent, including full HTML rendering, at
+**http://localhost:8025**.
+
+`MAIL_FROM` is a **documented placeholder**, never a real production sender
+address, and choosing a production SMTP provider, registering a domain, and
+configuring SPF/DKIM records are all explicitly **out of scope** for this
+project. This isn't laziness: the project has to cost \$0 and its server is
+only ever started to test, never run continuously — a production sender
+would have nothing to send from and nothing to keep warm, and SPF/DKIM,
+deliverability and spam behavior are properties of a domain and a paid
+provider, not of this codebase. None of this stage's actual lesson —the
+outbox, the transaction, the atomic claim, the backoff, the dedupe key—
+depends on which SMTP server receives the mail, because the boundary is
+plain SMTP either way; adopting a real provider later would be a
+configuration change, not a redesign.
+
+### Performance (RNF-5.1)
+
+`npm run perf:alerts-evaluation` seeds 1,000 alerts spread across 10 coins,
+built so none of them trigger, then measures how long `evaluateAlerts` (the
+alert-evaluation step `poll-prices` runs after storing prices) takes over
+that set — the one operation RNF-5.1 sets a budget for.
+
+Measured locally (Windows, MongoDB 8 via `MongoMemoryReplSet`):
+
+| Operation                                    | RNF-5.1 target | Measured | Result   |
+| --------------------------------------------- | --------------- | -------- | -------- |
+| `evaluateAlerts` (1,000 alerts, 10 coins, nothing triggers) | < 2000 ms       | 35.56 ms | **PASS** |
+
+Comfortably under budget — the `{ coinId: 1, status: 1 }` index restricts the
+evaluation cursor to alerts on coins that actually changed in this run, and
+`decide()` itself is a pure in-memory function with no per-alert database
+round trip. Re-run `npm run perf:alerts-evaluation` to reproduce; numbers
+vary with hardware.
+
+## Known limitations
+
+Three behaviors below are accepted, documented trade-offs (see `design.md`'s
+"Risks / Trade-offs") rather than bugs:
+
+- **A duplicate email is possible.** Delivery is at-least-once, not
+  exactly-once: if the worker process dies between a successful SMTP handoff
+  and the write that marks the notification `sent`, another run's stale-lock
+  recovery re-sends the exact same email. This is bounded by
+  `NOTIFY_LOCK_TIMEOUT_MIN` — a duplicate can only happen within that window
+  — and the duplicate is always an exact copy, never a new or different
+  event. Exactly-once delivery isn't achievable here; it would require
+  coordination with the mail provider that no plain SMTP server offers.
+- **A price spike within one polling window is invisible.** If a price
+  crosses an alert's threshold and comes back within a single
+  `POLL_PRICES_CRON` interval, no run ever samples the moment it was past
+  the threshold, so the alert never fires. This is inherent to periodic
+  sampling, not something more correctness in this stage could fix — only a
+  shorter polling interval narrows it, at the cost of more CoinGecko calls.
+- **`lastEvaluatedAt` means "last state change," not "last evaluated."** It
+  only updates when an evaluation actually triggers or re-arms an alert; a
+  run that decides `COOLDOWN` or `NOOP` (the condition isn't met, or it is
+  but the alert is still cooling down) leaves it untouched. This is
+  deliberate: writing a timestamp for every alert on every run — potentially
+  thousands of writes per tick at scale — would cost real throughput to
+  record a fact nothing actually queries for. Don't read `lastEvaluatedAt`
+  as "this alert was checked at this time"; read it as "this alert last
+  changed state at this time."
+
 ## Firebase Auth: development scripts and the Auth emulator
 
 There is no frontend in this project, so obtaining a Firebase ID token for
@@ -1019,6 +1367,51 @@ This one can't be reliably automated and is verified by hand:
      other secret.
 4. Stop the worker with `Ctrl+C` (`SIGINT`) and confirm it logs
    `shutdown iniciado`, waits for any in-progress run, and exits cleanly.
+
+### E5-18 — an already-satisfied alert produces a real email in Mailpit
+
+This is the one acceptance scenario in the alertas-email stage that genuinely
+needs a live SMTP sink to observe, so it's verified by hand rather than in the
+automated suite (which uses `FakeMailer` for exactly this reason — see
+`tests/integration/sendNotifications.test.ts`/`alertEvaluation.test.ts` for
+the equivalent automated coverage of every other behavior this manual check
+touches).
+
+1. `docker compose up -d` — starts the replica-set MongoDB and Mailpit. Wait
+   until `docker compose ps` shows `mongo` as `healthy`.
+2. Set a real `COINGECKO_API_KEY` in `.env`, plus (at minimum)
+   `SMTP_HOST=localhost`, `SMTP_PORT=1025` and `MAIL_FROM=alerts@crypto-tracker.local`
+   — Mailpit needs no `SMTP_USER`/`SMTP_PASS`. Point `MONGODB_URI` at
+   `mongodb://localhost:27017/?replicaSet=rs0&directConnection=true`.
+3. `npm run seed:coins` (needs at least one active coin, e.g. `bitcoin`).
+4. Get an auth token for a user with a **verified email** (see "Firebase Auth:
+   development scripts" above) and create an alert whose condition is already
+   true against the coin's current price — e.g. a `PRICE_BELOW` alert whose
+   `threshold` is comfortably above the coin's latest stored price:
+
+   ```bash
+   curl -X POST http://localhost:3000/api/v1/me/alerts \
+     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{"coingeckoId": "bitcoin", "type": "PRICE_BELOW", "threshold": 1000000000}'
+   ```
+
+   The response's `meta.conditionCurrentlyMet` should already be `true` — the
+   alert is created `armed` but not evaluated during this request (spec
+   alert-api), so nothing has fired yet.
+5. Start the worker: `npm run dev:worker` (or `npm run job:poll-prices` for
+   just one polling tick, followed by `npm run dev:worker` briefly so
+   `send-notifications`' own schedule — default every minute — has a chance to
+   claim and send the resulting notification; running the full worker is
+   simpler, since a triggered alert also dispatches `send-notifications`
+   immediately via its own overlap guard, per the alert-evaluation spec).
+6. **Expected:** within about a minute, a message appears at
+   **http://localhost:8025** addressed to the alert owner's email, with a
+   subject naming the coin and the condition (see `src/modules/notifications/templates/alert-triggered.ts`).
+   Opening it in Mailpit's UI shows both the HTML and plain-text bodies, the
+   triggering value, and the `PATCH /api/v1/me/alerts/<id>` call that disables
+   the alert.
+7. `docker compose down` when done (add `-v` to also drop the replica set's
+   volume if you want a completely clean slate next time).
 
 ## No secrets
 

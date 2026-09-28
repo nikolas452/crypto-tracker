@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+This capability defines how alerts are evaluated at the end of each price-polling run: which alerts are in scope, how triggers and rearms are written transactionally and non-transactionally, how failures degrade gracefully, and how a trigger dispatches notification sending immediately.
+
+## Requirements
 
 ### Requirement: Evaluation input is limited to this run's updated coins
 
@@ -41,14 +45,14 @@ Within the transaction the system SHALL load the user and, when that user no lon
 - **WHEN** an alert fires for a user whose email is no longer verified
 - **THEN** the transaction aborts, no notification is created, a `warn` is logged, and the alert remains `armed`
 
-### Requirement: Duplicate notification insert is idempotent success
+### Requirement: Duplicate notification insert is idempotent
 
-The system SHALL treat a duplicate-key error on `dedupeKey` during the transaction as a successful, already-recorded trigger rather than a failure.
+The system SHALL treat a duplicate-key error on `dedupeKey` during the transaction as an already-recorded trigger, never as a run-failing error. Because MongoDB cannot commit a multi-document transaction through a mid-transaction write error, the system SHALL abort the whole transaction on this error (leaving the alert in its pre-attempt state, to be re-evaluated on the next run) rather than attempt to commit past it.
 
 #### Scenario: A repeated trigger insert does not fail the run
 
 - **WHEN** the notification insert raises a duplicate-key error on `dedupeKey`
-- **THEN** the step is treated as successful and the run continues without error
+- **THEN** the transaction aborts, no duplicate notification is created, and the run continues to the next alert without error
 
 ### Requirement: Rollback on notification insert failure
 

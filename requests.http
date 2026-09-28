@@ -1,5 +1,5 @@
 ### Crypto Tracker API — manual requests (Stage 0: base setup, Stage 2: api-rest,
-### Stage 3: auth-firebase, Stage 4: watchlists)
+### Stage 3: auth-firebase, Stage 4: watchlists, Stage 5: alertas-email)
 ### Use with the REST Client extension (VS Code) or any compatible .http runner.
 ### Run `npm run dev` first, then send requests against http://localhost:3000.
 ### Stage 2 requires a seeded catalog (`npm run seed:coins`) and at least one
@@ -14,6 +14,15 @@
 ### `npm run user:set-role -- --email ... --role admin` (or created with
 ### `auth:create-test-user --admin` directly). `ADMIN_API_KEY`/`X-Admin-Key`
 ### no longer exist.
+### Stage 5 requests additionally need: MongoDB running as a replica set and a
+### local Mailpit instance (`docker compose up` — see the README's "Getting
+### started"), and the worker's `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/
+### `SMTP_PASS`/`MAIL_FROM` environment variables set (e.g. `SMTP_HOST=localhost`,
+### `SMTP_PORT=1025`, `MAIL_FROM=alerts@crypto-tracker.local` for local Mailpit
+### — see the README's "Environment variables" table for every variable's
+### exact default). The caller's Firebase account additionally needs a
+### **verified** email to create an alert (`EMAIL_NOT_VERIFIED` otherwise).
+### View everything the worker actually sends at http://localhost:8025.
 
 @baseUrl = http://localhost:3000
 @idToken = <your-id-token>
@@ -279,4 +288,156 @@ Content-Type: application/json
 ### No DELETE endpoint exists for coins (falls through to the global 404 —
 ### deleting would orphan watchlist references and price history).
 DELETE {{baseUrl}}/api/v1/admin/coins/bitcoin
+Authorization: Bearer {{adminIdToken}}
+
+### ============================================================
+### Stage 5 (alertas-email): the authenticated user's own alerts
+### ============================================================
+
+### Without a token -> 401 UNAUTHENTICATED.
+GET {{baseUrl}}/api/v1/me/alerts
+
+### List the caller's alerts (default: all statuses, createdAt desc).
+GET {{baseUrl}}/api/v1/me/alerts
+Authorization: Bearer {{idToken}}
+
+### Filtered by status (comma-separated) and coin.
+GET {{baseUrl}}/api/v1/me/alerts?status=armed,triggered&coingeckoId=bitcoin
+Authorization: Bearer {{idToken}}
+
+### Create a PRICE_BELOW alert. Requires bitcoin to exist and be active, and
+### the caller's email to be verified. 201 + Location header; meta reports
+### the coin's current value and whether the condition is already met.
+POST {{baseUrl}}/api/v1/me/alerts
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "bitcoin", "type": "PRICE_BELOW", "threshold": 70000, "note": "largo plazo"}
+
+### Create a CHANGE_24H_ABS_GTE alert with its own threshold range (0.1-100).
+POST {{baseUrl}}/api/v1/me/alerts
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "bitcoin", "type": "CHANGE_24H_ABS_GTE", "threshold": 5, "cooldownMinutes": 30}
+
+### A threshold outside its type's range -> 400 VALIDATION_ERROR.
+POST {{baseUrl}}/api/v1/me/alerts
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "bitcoin", "type": "CHANGE_24H_ABS_GTE", "threshold": 150}
+
+### A caller whose email isn't verified -> 422 UNPROCESSABLE / EMAIL_NOT_VERIFIED (E5-1).
+POST {{baseUrl}}/api/v1/me/alerts
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "bitcoin", "type": "PRICE_ABOVE", "threshold": 80000}
+
+### An unknown or inactive coingeckoId -> 404 NOT_FOUND.
+POST {{baseUrl}}/api/v1/me/alerts
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "no-existe", "type": "PRICE_ABOVE", "threshold": 80000}
+
+### Already at ALERTS_MAX_ACTIVE armed/triggered alerts -> 422 UNPROCESSABLE / LIMIT_REACHED.
+POST {{baseUrl}}/api/v1/me/alerts
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"coingeckoId": "ethereum", "type": "PRICE_ABOVE", "threshold": 5000}
+
+### Alert detail by id (replace with a real _id from a listing above).
+GET {{baseUrl}}/api/v1/me/alerts/651f1c2e8b1e2a0012a3b789
+Authorization: Bearer {{idToken}}
+
+### Malformed id -> 400 VALIDATION_ERROR.
+GET {{baseUrl}}/api/v1/me/alerts/not-an-object-id
+Authorization: Bearer {{idToken}}
+
+### Another user's alert is reported as 404, never 403 (E5-16).
+GET {{baseUrl}}/api/v1/me/alerts/651f1c2e8b1e2a0012a3b000
+Authorization: Bearer {{idToken}}
+
+### PATCH: disable an alert (status -> disabled, whatever it was before).
+PATCH {{baseUrl}}/api/v1/me/alerts/651f1c2e8b1e2a0012a3b789
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"enabled": false}
+
+### PATCH: re-enable a disabled alert (status -> armed; 422 LIMIT_REACHED if
+### the caller is already at ALERTS_MAX_ACTIVE).
+PATCH {{baseUrl}}/api/v1/me/alerts/651f1c2e8b1e2a0012a3b789
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"enabled": true}
+
+### PATCH: change the threshold. If the alert was `triggered`, this re-arms
+### it (status -> armed) without resetting lastTriggeredAt/triggerCount.
+PATCH {{baseUrl}}/api/v1/me/alerts/651f1c2e8b1e2a0012a3b789
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"threshold": 65000}
+
+### `type` is immutable -> 400 VALIDATION_ERROR (the field isn't even part of
+### the PATCH schema, so it's rejected the same way an unknown field is).
+PATCH {{baseUrl}}/api/v1/me/alerts/651f1c2e8b1e2a0012a3b789
+Authorization: Bearer {{idToken}}
+Content-Type: application/json
+
+{"type": "PRICE_ABOVE"}
+
+### Delete an alert. Always 204; any of its `pending` notifications move to
+### `cancelled`.
+DELETE {{baseUrl}}/api/v1/me/alerts/651f1c2e8b1e2a0012a3b789
+Authorization: Bearer {{idToken}}
+
+### ============================================================
+### Stage 5 (alertas-email): the authenticated user's own notifications
+### ============================================================
+
+### List the caller's notification history (masked `to`, only `lastError.code`).
+GET {{baseUrl}}/api/v1/me/notifications
+Authorization: Bearer {{idToken}}
+
+### Filtered to failed notifications only.
+GET {{baseUrl}}/api/v1/me/notifications?status=failed
+Authorization: Bearer {{idToken}}
+
+### ============================================================
+### Stage 5 (alertas-email): admin notifications (requireAuth + requireRole('admin'))
+### ============================================================
+
+### Authenticated but not an admin -> 403 FORBIDDEN.
+GET {{baseUrl}}/api/v1/admin/notifications
+Authorization: Bearer {{idToken}}
+
+### Paginated list with full diagnostic detail (complete lastError, lockedBy).
+GET {{baseUrl}}/api/v1/admin/notifications
+Authorization: Bearer {{adminIdToken}}
+
+### Filtered by status and a createdAt range.
+GET {{baseUrl}}/api/v1/admin/notifications?status=failed&from=2026-09-01T00:00:00Z&to=2026-09-23T00:00:00Z
+Authorization: Bearer {{adminIdToken}}
+
+### Retry a `failed` notification -> 200, status becomes `pending` with
+### attempts: 0 and a cleared lastError (E5-17). Replace with a real _id.
+POST {{baseUrl}}/api/v1/admin/notifications/651f1c2e8b1e2a0012a3b900/retry
+Authorization: Bearer {{adminIdToken}}
+
+### Retrying a notification that isn't `failed` (e.g. already `sent`) -> 409
+### CONFLICT, unchanged (E5-17). An unknown id -> 404 NOT_FOUND instead.
+POST {{baseUrl}}/api/v1/admin/notifications/651f1c2e8b1e2a0012a3b901/retry
+Authorization: Bearer {{adminIdToken}}
+
+### Send an immediate test email to the calling admin's own address, bypassing
+### the outbox entirely (no `notifications` document is created). 200 with a
+### `messageId`; 502 UPSTREAM_ERROR with the mailer's error code if SMTP is
+### unavailable. Check http://localhost:8025 for the result.
+POST {{baseUrl}}/api/v1/admin/notifications/test-email
 Authorization: Bearer {{adminIdToken}}

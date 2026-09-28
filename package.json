@@ -25,6 +25,7 @@
     "backfill:history": "tsx --env-file-if-exists=.env src/scripts/backfillHistory.ts",
     "perf:coins-list": "tsx --env-file-if-exists=.env src/scripts/perf/coinsListPerf.ts",
     "perf:watchlist": "tsx --env-file-if-exists=.env src/scripts/perf/watchlistPerf.ts",
+    "perf:alerts-evaluation": "tsx --env-file-if-exists=.env src/scripts/perf/alertsEvaluationPerf.ts",
     "auth:create-test-user": "tsx --env-file-if-exists=.env src/scripts/createTestUser.ts",
     "auth:token": "tsx --env-file-if-exists=.env src/scripts/authToken.ts",
     "user:set-role": "tsx --env-file-if-exists=.env src/scripts/setRole.ts"
@@ -38,6 +39,7 @@
     "helmet": "8.3.0",
     "mongoose": "9.10.1",
     "node-cron": "^4.6.0",
+    "nodemailer": "^10.0.12",
     "pino": "10.3.1",
     "pino-http": "11.0.0",
     "zod": "4.6.5"
@@ -46,6 +48,7 @@
     "@eslint/js": "10.0.1",
     "@types/express": "5.0.6",
     "@types/node": "22.20.3",
+    "@types/nodemailer": "^8.0.2",
     "@types/supertest": "7.2.1",
     "@vitest/coverage-v8": "5.0.1",
     "eslint": "10.10.0",

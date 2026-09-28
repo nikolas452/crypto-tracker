@@ -12,6 +12,14 @@ import {
 import type { JobSkipReason, JobStatus, JobTrigger } from '../modules/job-runs/job-runs.model.js';
 import type { CoinGeckoClient } from '../integrations/coingecko/coingecko.types.js';
 import { CoinGeckoError } from '../integrations/coingecko/coingecko.errors.js';
+import {
+  evaluateAlerts,
+  type AlertEvaluationStats,
+  type CoinInfoEntry,
+  type CoinValueEntry,
+  type EvaluateAlertsDeps,
+  type EvaluateAlertsInput,
+} from './alertEvaluation.js';
 
 export const JOB_NAME = 'poll-prices';
 
@@ -23,6 +31,34 @@ export interface CreatePollPricesJobDeps {
   readonly clock: Clock;
   readonly logger: Logger;
   readonly workerId: string;
+  /**
+   * Punto de extensión para el job `send-notifications` (tarea 6.10,
+   * ahora sí conectado desde `worker.ts`: pasa ahí el disparo real del job
+   * `send-notifications` a través de su propia guarda de solapamiento,
+   * fire-and-forget — ver el comentario de `sendGuard` en `worker.ts`).
+   * `pollPrices.ts` sigue sin saber nada de `send-notifications` más allá
+   * de esta función: llama al hook a ciegas y nunca lo espera ni deja que
+   * afecte el estado/timing de la corrida actual. Por defecto un no-op
+   * (los tests unitarios de este archivo, que no levantan un worker
+   * completo, nunca lo pasan).
+   */
+  readonly triggerSendNotifications?: () => void;
+  /** Inyectable para tests: overridea el insert de notificación del paso de evaluación de alertas. */
+  readonly alertEvaluationDeps?: EvaluateAlertsDeps;
+  /**
+   * Inyectable para tests: por defecto, la implementación real de
+   * `evaluateAlerts()` (`src/jobs/alertEvaluation.ts`), que usa
+   * `AlertModel`/`NotificationModel`/`UserModel` directamente y por lo tanto
+   * necesita una conexión Mongoose activa. Los tests de integración de
+   * `alertEvaluation.test.ts` la dejan sin overridear (corren contra un Mongo
+   * real); los unitarios de `pollPrices.test.ts`, que no levantan Mongo,
+   * la overridean con un fake — mismo criterio de inyección que
+   * `coinsRepo`/`snapshotsRepo`/`coingecko`.
+   */
+  readonly evaluateAlerts?: (
+    input: EvaluateAlertsInput,
+    evalDeps?: EvaluateAlertsDeps,
+  ) => Promise<{ stats: AlertEvaluationStats }>;
 }
 
 export interface JobRunResult {
@@ -60,6 +96,8 @@ function toJobRunError(caught: unknown): JobRunError {
  */
 export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJob {
   const { coinsRepo, snapshotsRepo, jobRunsRepo, coingecko, clock, logger, workerId } = deps;
+  const triggerSendNotifications = deps.triggerSendNotifications ?? (() => {});
+  const evaluateAlertsFn = deps.evaluateAlerts ?? evaluateAlerts;
 
   return {
     async run(trigger) {
@@ -223,7 +261,56 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
           }
         }
 
+        // Evaluación de alertas (spec alert-evaluation): solo sobre las
+        // monedas que recibieron un snapshot NUEVO en esta corrida
+        // (docsToInsert), nunca sobre todo activeCoins. Un fallo acá nunca
+        // hace fallar la corrida entera: degrada a `partial` con
+        // `ALERT_EVALUATION_FAILED`, preservando los snapshots y el refresh
+        // de `latest` ya hechos arriba (mismo patrón "upgrade only, never
+        // downgrade" que latestUpdateError).
+        let alertStats = {
+          alertsEvaluated: 0,
+          alertsTriggered: 0,
+          alertsRearmed: 0,
+          alertsInCooldown: 0,
+          triggerConflicts: 0,
+        };
+        let alertEvaluationError: JobRunError | null = null;
+
+        if (docsToInsert.length > 0) {
+          const coinValueMap = new Map<string, CoinValueEntry>(
+            docsToInsert.map((doc) => [
+              doc.coinId.toString(),
+              { priceUsd: doc.priceUsd, change24hPct: doc.change24hPct },
+            ]),
+          );
+          const coinInfoMap = new Map<string, CoinInfoEntry>(
+            activeCoins.map((coin) => [
+              coin.id.toString(),
+              { coingeckoId: coin.coingeckoId, name: coin.name, symbol: coin.symbol },
+            ]),
+          );
+
+          try {
+            const evaluationResult = await evaluateAlertsFn(
+              { coinValueMap, coinInfoMap, now: startedAt, logger },
+              deps.alertEvaluationDeps,
+            );
+            alertStats = evaluationResult.stats;
+          } catch (caught) {
+            logger.error(
+              { runId: runId.toString(), err: caught },
+              'poll-prices: alert evaluation failed; snapshots and the coins.latest refresh already done are kept',
+            );
+            alertEvaluationError = {
+              code: 'ALERT_EVALUATION_FAILED',
+              message: 'Alert evaluation failed unexpectedly',
+            };
+          }
+        }
+
         const stats: JobRunStats = {
+          ...EMPTY_JOB_RUN_STATS,
           coinsRequested: activeCoins.length,
           coinsReturned: prices.size,
           snapshotsInserted,
@@ -231,6 +318,7 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
           missingCoins,
           upstreamAttempts: attempts,
           latestUpdated,
+          ...alertStats,
         };
 
         const allMissing = missingCoins.length === activeCoins.length;
@@ -246,6 +334,26 @@ export function createPollPricesJob(deps: CreatePollPricesJobDeps): PollPricesJo
         if (latestUpdateError && status !== 'failed') {
           status = 'partial';
           error = latestUpdateError;
+        }
+
+        if (alertEvaluationError && status !== 'failed') {
+          status = 'partial';
+          error = alertEvaluationError;
+        }
+
+        // Punto de extensión de la tarea 6.10, conectado desde `worker.ts`:
+        // fire-and-forget, nunca esperado, nunca puede afectar el
+        // status/timing de esta corrida — ver el comentario de
+        // `triggerSendNotifications` en `CreatePollPricesJobDeps`.
+        if (status !== 'failed' && stats.alertsTriggered > 0) {
+          try {
+            triggerSendNotifications();
+          } catch (caught) {
+            logger.error(
+              { runId: runId.toString(), err: caught },
+              'poll-prices: triggerSendNotifications hook threw',
+            );
+          }
         }
 
         return await closeRun(status, stats, error);

@@ -103,6 +103,30 @@ const baseEnvSchema = z.object({
 
   // --- watchlists: límite de ítems por usuario (spec watchlist-store) ---
   WATCHLIST_MAX_ITEMS: z.coerce.number().int().positive().default(50),
+
+  // --- alertas-email: SMTP, plantilla de correo y jobs de alertas/notificaciones ---
+  // SMTP_HOST y MAIL_FROM son opcionales a nivel de schema (mismo motivo que
+  // las credenciales de Firebase) para que `parseEnv` siga siendo testeable
+  // sin ellas; `assertSmtpCredentials()` las exige en el worker, que es el
+  // único entrypoint que efectivamente envía correo.
+  SMTP_HOST: z.string().min(1).optional(),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
+  // Mailpit local no requiere autenticación, por eso quedan opcionales.
+  SMTP_USER: z.string().min(1).optional(),
+  SMTP_PASS: z.string().min(1).optional(),
+  MAIL_FROM: z.string().min(1).optional(),
+  // Zona horaria de referencia mostrada en el cuerpo del email (spec
+  // email-templates), separada de la marca de tiempo UTC que siempre se
+  // incluye también.
+  MAIL_DISPLAY_TIMEZONE: z.string().min(1).default('America/Argentina/Buenos_Aires'),
+  MAIL_MAX_PER_MINUTE: z.coerce.number().int().positive().default(30),
+  // Tope de alertas activas (armed + triggered) por usuario (spec alert-store).
+  ALERTS_MAX_ACTIVE: z.coerce.number().int().positive().default(20),
+  SEND_NOTIFICATIONS_CRON: z.string().min(1).default('* * * * *'),
+  NOTIFY_BATCH_SIZE: z.coerce.number().int().positive().default(20),
+  NOTIFY_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  NOTIFY_LOCK_TIMEOUT_MIN: z.coerce.number().int().positive().default(10),
+  NOTIFICATIONS_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 });
 
 // El valor por defecto de TRUST_PROXY, dependiente de NODE_ENV, se aplica
@@ -248,6 +272,30 @@ export function assertFirebaseCredentials(
       { invalidVariables: missing },
       'Missing required Firebase service account credentials and no ' +
         'FIREBASE_AUTH_EMULATOR_HOST configured; refusing to start.',
+    );
+    process.exit(1);
+  }
+}
+
+/**
+ * Guarda de fallo rápido para el envío de correo (spec mailer, tarea 2.2):
+ * `SMTP_HOST` y `MAIL_FROM` son opcionales a nivel de schema para que
+ * `parseEnv` siga siendo testeable sin ellas; el worker (único entrypoint que
+ * corre `send-notifications`) las exige llamando a esto inmediatamente
+ * después de cargar la config, mismo patrón de log-fatal-y-exit-1 que
+ * {@link assertCoinGeckoApiKey} y {@link assertFirebaseCredentials}.
+ */
+export function assertSmtpCredentials(
+  cfg: Config,
+  bootstrapLogger: Pick<Logger, 'fatal'>,
+): asserts cfg is Config & { SMTP_HOST: string; MAIL_FROM: string } {
+  const requiredVariables = ['SMTP_HOST', 'MAIL_FROM'] as const;
+  const missing = requiredVariables.filter((variable) => !cfg[variable]);
+
+  if (missing.length > 0) {
+    bootstrapLogger.fatal(
+      { invalidVariables: missing },
+      'Missing required environment variables for outgoing mail; refusing to start.',
     );
     process.exit(1);
   }

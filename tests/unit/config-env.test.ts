@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   assertCoinGeckoApiKey,
   assertFirebaseCredentials,
+  assertSmtpCredentials,
   EnvValidationError,
   parseEnv,
 } from '../../src/config/env.js';
@@ -37,6 +38,15 @@ describe('parseEnv', () => {
       USER_RATE_LIMIT_PER_MIN: 120,
       LAST_SEEN_THROTTLE_MIN: 5,
       WATCHLIST_MAX_ITEMS: 50,
+      SMTP_PORT: 587,
+      MAIL_DISPLAY_TIMEZONE: 'America/Argentina/Buenos_Aires',
+      MAIL_MAX_PER_MINUTE: 30,
+      ALERTS_MAX_ACTIVE: 20,
+      SEND_NOTIFICATIONS_CRON: '* * * * *',
+      NOTIFY_BATCH_SIZE: 20,
+      NOTIFY_MAX_ATTEMPTS: 5,
+      NOTIFY_LOCK_TIMEOUT_MIN: 10,
+      NOTIFICATIONS_RETENTION_DAYS: 90,
     });
   });
 
@@ -372,6 +382,55 @@ describe('assertCoinGeckoApiKey', () => {
     assertCoinGeckoApiKey(config, logger);
 
     expect(logger.fatal).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+});
+
+describe('assertSmtpCredentials', () => {
+  it('does not exit when SMTP_HOST and MAIL_FROM are both present', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      SMTP_HOST: 'localhost',
+      MAIL_FROM: 'alerts@example.test',
+    });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertSmtpCredentials(config, logger);
+
+    expect(logger.fatal).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+  });
+
+  it('logs fatal and exits with code 1 when SMTP_HOST and MAIL_FROM are both missing', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertSmtpCredentials(config, logger);
+
+    expect(logger.fatal).toHaveBeenCalledTimes(1);
+    expect(logger.fatal).toHaveBeenCalledWith(
+      { invalidVariables: ['SMTP_HOST', 'MAIL_FROM'] },
+      expect.any(String),
+    );
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    exitSpy.mockRestore();
+  });
+
+  it('logs fatal and exits with code 1 when only MAIL_FROM is missing', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      SMTP_HOST: 'localhost',
+    });
+    const logger = { fatal: vi.fn() };
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+
+    assertSmtpCredentials(config, logger);
+
+    expect(logger.fatal).toHaveBeenCalledWith({ invalidVariables: ['MAIL_FROM'] }, expect.any(String));
     expect(exitSpy).toHaveBeenCalledWith(1);
     exitSpy.mockRestore();
   });

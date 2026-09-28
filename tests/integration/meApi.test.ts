@@ -5,6 +5,8 @@ import { createApp } from '../../src/app.js';
 import { UserModel } from '../../src/modules/users/users.model.js';
 import { CoinModel } from '../../src/modules/coins/coins.model.js';
 import { WatchlistItemModel } from '../../src/modules/watchlist/watchlist.model.js';
+import { AlertModel } from '../../src/modules/alerts/alerts.model.js';
+import { NotificationModel } from '../../src/modules/notifications/notifications.model.js';
 import { createFakeTokenVerifier } from '../../src/integrations/firebase/fakeTokenVerifier.js';
 import { ensureCollections } from '../../src/db/ensureCollections.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
@@ -183,6 +185,75 @@ describe('me API (integration)', () => {
       expect(response.status).toBe(204);
       const remainingItems = await WatchlistItemModel.countDocuments({ userId: user!._id });
       expect(remainingItems).toBe(0);
+    });
+
+    // E5-15 / spec account-deletion-cascade: las alertas y notificaciones
+    // pendientes del usuario se borran junto con la cuenta, sin llegar a
+    // enviarse nunca. Una notificación `sending` (ya reclamada por un job de
+    // envío) se deja intacta a propósito, para que ese envío en curso pueda
+    // terminar sin corromperse.
+    it("E5-15: deletes the user's alerts and pending notifications along with the account, leaving a 'sending' one untouched", async () => {
+      const app = createAppWithFakeAuth();
+      await request(app).get('/api/v1/me').set('Authorization', `Bearer ${TOKEN}`);
+      const user = await UserModel.findOne({ firebaseUid: IDENTITY.uid });
+
+      const coin = await CoinModel.create({
+        coingeckoId: 'bitcoin',
+        symbol: 'btc',
+        name: 'Bitcoin',
+        isActive: true,
+      });
+      const alerts = await AlertModel.create([
+        { userId: user!._id, coinId: coin._id, type: 'PRICE_BELOW', threshold: 50000 },
+        { userId: user!._id, coinId: coin._id, type: 'PRICE_ABOVE', threshold: 90000 },
+      ]);
+
+      const notificationPayload = {
+        coingeckoId: 'bitcoin',
+        coinName: 'Bitcoin',
+        symbol: 'btc',
+        alertType: 'PRICE_BELOW' as const,
+        threshold: 50000,
+        value: 49000,
+        priceUsd: 49000,
+        change24hPct: null,
+        triggeredAt: new Date(),
+        note: null,
+      };
+      const pendingNotification = await NotificationModel.create({
+        userId: user!._id,
+        alertId: alerts[0]!._id,
+        to: IDENTITY.email,
+        status: 'pending',
+        dedupeKey: `${alerts[0]!._id.toString()}:1`,
+        payload: notificationPayload,
+      });
+      const sendingNotification = await NotificationModel.create({
+        userId: user!._id,
+        alertId: alerts[1]!._id,
+        to: IDENTITY.email,
+        status: 'sending',
+        lockedAt: new Date(),
+        lockedBy: 'some-other-worker',
+        dedupeKey: `${alerts[1]!._id.toString()}:1`,
+        payload: notificationPayload,
+      });
+
+      const response = await request(app)
+        .delete('/api/v1/me')
+        .set('Authorization', `Bearer ${TOKEN}`);
+
+      expect(response.status).toBe(204);
+
+      const remainingAlerts = await AlertModel.countDocuments({ userId: user!._id });
+      expect(remainingAlerts).toBe(0);
+
+      const remainingPending = await NotificationModel.findById(pendingNotification._id);
+      expect(remainingPending).toBeNull();
+
+      const stillSending = await NotificationModel.findById(sendingNotification._id);
+      expect(stillSending).not.toBeNull();
+      expect(stillSending!.status).toBe('sending');
     });
 
     // Documentado en el README (tarea 7.5): la cuenta de Firebase sobrevive,
