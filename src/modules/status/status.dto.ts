@@ -10,6 +10,8 @@ export interface PollPricesStatusDto {
   readonly lastRunAt: Date | null;
   readonly lastRunStatus: JobStatus | null;
   readonly stale: boolean;
+  readonly nextRunAt: Date | null;
+  readonly disabled: boolean;
 }
 
 export interface StatusResponseDto {
@@ -23,6 +25,8 @@ export interface StatusDtoSource {
   readonly lastRunStatus: JobStatus | null;
   readonly lastSuccessAt: Date | null;
   readonly stale: boolean;
+  readonly nextRunAt: Date | null;
+  readonly disabled: boolean;
 }
 
 /**
@@ -38,6 +42,8 @@ export function toStatusResponseDto(source: StatusDtoSource): StatusResponseDto 
       lastRunAt: source.lastRunAt,
       lastRunStatus: source.lastRunStatus,
       stale: source.stale,
+      nextRunAt: source.nextRunAt,
+      disabled: source.disabled,
     },
   };
 }

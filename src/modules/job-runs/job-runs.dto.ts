@@ -33,6 +33,8 @@ export interface JobRunDto {
   readonly stats: JobRunStatsDto;
   readonly error: JobRunErrorDto | null;
   readonly workerId: string;
+  readonly agendaJobId: string | null;
+  readonly attempt: number;
 }
 
 /** El subconjunto de un documento `job_runs` del que leen estos builders de DTO. */
@@ -48,6 +50,8 @@ export interface JobRunDtoSource {
   readonly stats: JobRunStatsDto;
   readonly error: JobRunErrorDto | null;
   readonly workerId: string;
+  readonly agendaJobId: string | null;
+  readonly attempt: number;
 }
 
 /**
@@ -71,5 +75,7 @@ export function toJobRunDto(run: JobRunDtoSource): JobRunDto {
     stats: run.stats,
     error: run.error,
     workerId: run.workerId,
+    agendaJobId: run.agendaJobId,
+    attempt: run.attempt,
   };
 }

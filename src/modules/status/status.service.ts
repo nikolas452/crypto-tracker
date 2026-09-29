@@ -1,8 +1,10 @@
+import type { Db } from 'mongodb';
 import { config } from '../../config/env.js';
 import { systemClock, type Clock } from '../../lib/clock.js';
 import { JOB_NAME } from '../../jobs/pollPrices.js';
 import { countActiveCoins } from '../coins/coins.service.js';
 import { getLastRun, getLastSuccessfulRun } from '../job-runs/job-runs.service.js';
+import { getRecurringJobInfo } from '../../scheduler/definitions.js';
 import { toStatusResponseDto, type StatusResponseDto } from './status.dto.js';
 
 /**
@@ -19,17 +21,31 @@ import { toStatusResponseDto, type StatusResponseDto } from './status.dto.js';
  * `STALE_POLL_THRESHOLD_MIN` minutos, incluyendo el caso en que nunca hubo
  * ninguna.
  */
-export async function getStatus(clock: Clock = systemClock): Promise<StatusResponseDto> {
-  const [activeCoins, lastRun, lastSuccess] = await Promise.all([
+
+/**
+ * Regla de "polling obsoleto", extraída para que el job `maintenance`
+ * (spec maintenance-job: "by the same rule the status endpoint uses") la
+ * reutilice literalmente en lugar de duplicarla.
+ */
+export function isPollPricesStale(
+  lastSuccessAt: Date | null,
+  now: Date,
+  thresholdMin: number = config.STALE_POLL_THRESHOLD_MIN,
+): boolean {
+  const thresholdMs = thresholdMin * 60_000;
+  return lastSuccessAt === null || now.getTime() - lastSuccessAt.getTime() > thresholdMs;
+}
+
+export async function getStatus(db: Db, clock: Clock = systemClock): Promise<StatusResponseDto> {
+  const [activeCoins, lastRun, lastSuccess, recurring] = await Promise.all([
     countActiveCoins(),
     getLastRun(JOB_NAME),
     getLastSuccessfulRun(JOB_NAME),
+    getRecurringJobInfo(db, JOB_NAME),
   ]);
 
   const lastSuccessAt = lastSuccess?.finishedAt ?? null;
-  const thresholdMs = config.STALE_POLL_THRESHOLD_MIN * 60_000;
-  const stale =
-    lastSuccessAt === null || clock.now().getTime() - lastSuccessAt.getTime() > thresholdMs;
+  const stale = isPollPricesStale(lastSuccessAt, clock.now());
 
   return toStatusResponseDto({
     activeCoins,
@@ -37,5 +53,7 @@ export async function getStatus(clock: Clock = systemClock): Promise<StatusRespo
     lastRunStatus: lastRun?.status ?? null,
     lastSuccessAt,
     stale,
+    nextRunAt: recurring.nextRunAt,
+    disabled: recurring.disabled,
   });
 }

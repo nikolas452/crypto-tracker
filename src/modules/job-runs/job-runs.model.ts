@@ -9,10 +9,12 @@ import { config } from '../../config/env.js';
 export const JOB_STATUSES = ['running', 'success', 'partial', 'failed', 'skipped'] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
-export const JOB_TRIGGERS = ['schedule', 'manual', 'startup'] as const;
+// `schedule` se conserva solo para corridas registradas antes de la
+// migración a Agenda (spec job-run-tracking); ninguna corrida nueva lo usa.
+export const JOB_TRIGGERS = ['schedule', 'manual', 'startup', 'agenda', 'retry', 'api'] as const;
 export type JobTrigger = (typeof JOB_TRIGGERS)[number];
 
-export const JOB_SKIP_REASONS = ['overlap', 'no_active_coins'] as const;
+export const JOB_SKIP_REASONS = ['overlap', 'no_active_coins', 'locked'] as const;
 export type JobSkipReason = (typeof JOB_SKIP_REASONS)[number];
 
 const jobRunErrorSchema = new Schema(
@@ -67,6 +69,12 @@ const jobRunSchema = new Schema(
     // Solo { code, message } — nunca un stack trace ni un secreto.
     error: { type: jobRunErrorSchema, default: null },
     workerId: { type: String, required: true },
+    // Id del documento de Agenda que produjo esta corrida (fase 6); `null`
+    // para corridas manuales/de arranque que no pasan por Agenda.
+    agendaJobId: { type: String, default: null },
+    // Número de intento dentro de la política de reintentos (spec
+    // job-retry-policy): 1 para la corrida original, 2 para su único reintento.
+    attempt: { type: Number, required: true, default: 1 },
   },
   {
     collection: 'job_runs',

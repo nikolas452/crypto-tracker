@@ -5,23 +5,23 @@ import { connectDb, disconnectDb } from '../db/connect.js';
 import { ensureCollections } from '../db/ensureCollections.js';
 import { systemClock } from '../lib/clock.js';
 import { createWorkerId } from '../lib/workerId.js';
+import { acquire, release } from '../lib/lease-lock.js';
 import { createCoinGeckoClient } from '../integrations/coingecko/coingecko.client.js';
 import { createCoinsRepo } from '../modules/coins/coins.service.js';
 import { createSnapshotsRepo } from '../modules/snapshots/snapshots.service.js';
 import { createJobRunsRepo } from '../modules/job-runs/job-runs.service.js';
-import { createPollPricesJob, type JobRunResult } from '../jobs/pollPrices.js';
+import { createPollPricesJob, JOB_NAME, type JobRunResult } from '../jobs/pollPrices.js';
 
 /**
  * `npm run job:poll-prices` (RF-1.8): ejecuta el job `poll-prices` exactamente
  * una vez con `trigger: "manual"`, imprime el resultado y termina.
  *
- * NO se coordina con la guarda de solapamiento en memoria del worker — ese
- * flag vive solo dentro de la memoria del proceso del worker. Si este script
- * corre mientras el worker está a mitad de un tick, ambos pueden ejecutarse
- * concurrentemente; la propia deduplicación del job (por `sourceUpdatedAt`,
- * una agregación por corrida) es lo que evita datos de snapshot duplicados
- * en ese caso, no un lock compartido. La coordinación real entre procesos
- * queda diferida a la etapa 6 (locking basado en Agenda).
+ * Desde la fase 6 adquiere el mismo lease (`src/lib/lease-lock.ts`) que el
+ * adaptador de Agenda (`src/scheduler/adapters.ts`) antes de correr: si el
+ * worker ya tiene `poll-prices` en curso, este script queda `skipped` con
+ * `skipReason: "locked"` en lugar de competir por los mismos datos de
+ * CoinGecko — resolviendo la limitación documentada en la etapa 1 (un run
+ * manual podía solapar con el del worker).
  */
 export function exitCodeFor(status: JobRunResult['status']): 0 | 1 {
   return status === 'failed' ? 1 : 0;
@@ -54,22 +54,46 @@ async function main(): Promise<void> {
     logger,
   });
 
-  const job = createPollPricesJob({
-    coinsRepo: createCoinsRepo(),
-    snapshotsRepo: createSnapshotsRepo(),
-    jobRunsRepo: createJobRunsRepo(),
-    coingecko,
-    clock: systemClock,
-    logger,
-    workerId: createWorkerId(),
-  });
+  const jobRunsRepo = createJobRunsRepo();
+  const workerId = createWorkerId();
+  const owner = `${workerId}:manual-script`;
 
-  const result = await job.run('manual');
-  printResult(result);
+  const acquired = await acquire(JOB_NAME, owner, config.POLL_LOCK_TTL_MS, systemClock.now());
 
-  await disconnectDb();
+  if (!acquired) {
+    const at = systemClock.now();
+    await jobRunsRepo.createSkipped({
+      jobName: JOB_NAME,
+      trigger: 'manual',
+      skipReason: 'locked',
+      at,
+      workerId,
+    });
+    console.log('job:poll-prices result: status=skipped skipReason=locked (lease held by another run)');
+    await disconnectDb();
+    process.exitCode = 0;
+    return;
+  }
 
-  process.exitCode = exitCodeFor(result.status);
+  try {
+    const job = createPollPricesJob({
+      coinsRepo: createCoinsRepo(),
+      snapshotsRepo: createSnapshotsRepo(),
+      jobRunsRepo,
+      coingecko,
+      clock: systemClock,
+      logger,
+      workerId,
+    });
+
+    const result = await job.run('manual');
+    printResult(result);
+
+    process.exitCode = exitCodeFor(result.status);
+  } finally {
+    await release(JOB_NAME, owner);
+    await disconnectDb();
+  }
 }
 
 const isMainModule =

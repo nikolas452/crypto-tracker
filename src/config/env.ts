@@ -127,6 +127,33 @@ const baseEnvSchema = z.object({
   NOTIFY_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   NOTIFY_LOCK_TIMEOUT_MIN: z.coerce.number().int().positive().default(10),
   NOTIFICATIONS_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
+
+  // --- agenda: scheduler (reemplaza node-cron) ---
+  // Punto de extensión documentado a futuro (spec agenda-scheduler / design.md
+  // "Decisions"): hoy el único valor soportado es "agenda"; node-cron se
+  // elimina en esta etapa en lugar de mantenerse detrás de un switch
+  // SCHEDULER=cron.
+  // Verificación de versión de driver (design.md "Risks"): `npm ls mongodb`
+  // resuelve mongoose 9.10.1 -> mongodb@7.6.0, que satisface el peer
+  // dependency de `@agendajs/mongo-backend@4.0.3` (`^6.0.0 || ^7.0.0`, junto
+  // con `agenda@6.2.6` exacto). No hay mismatch: Agenda comparte la conexión
+  // existente de Mongoose en lugar de abrir una segunda.
+  SCHEDULER: z.string().min(1).default('agenda'),
+  // Frecuencia con la que Agenda revisa la colección `agenda_jobs` en busca
+  // de trabajo vencido. Ver design.md "Risks": introduce latencia de
+  // programación de hasta este valor.
+  AGENDA_PROCESS_EVERY: z.string().min(1).default('10 seconds'),
+  AGENDA_MAX_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  // Días que se conservan los documentos de `agenda_jobs` NO recurrentes
+  // (creados por `agenda.now()`) después de finalizar, antes de que el job
+  // `maintenance` los elimine.
+  AGENDA_ONE_OFF_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
+  MAINTENANCE_CRON: z.string().min(1).default('15 3 * * *'),
+  // TTL en milisegundos del lease de `poll-prices` (src/lib/lease-lock.ts).
+  POLL_LOCK_TTL_MS: z.coerce.number().int().positive().default(300000),
+  // Reintentos adicionales permitidos tras un fallo transitorio de
+  // poll-prices (spec job-retry-policy), antes de dejar de reintentar.
+  POLL_MAX_JOB_RETRIES: z.coerce.number().int().min(0).default(1),
 });
 
 // El valor por defecto de TRUST_PROXY, dependiente de NODE_ENV, se aplica

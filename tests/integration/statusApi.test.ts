@@ -1,11 +1,20 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import pino from 'pino';
+import mongoose from 'mongoose';
 import { createApp } from '../../src/app.js';
 import { CoinModel } from '../../src/modules/coins/coins.model.js';
 import { JobRunModel } from '../../src/modules/job-runs/job-runs.model.js';
 import { ensureCollections } from '../../src/db/ensureCollections.js';
+import { createAgenda, JOB_NAMES } from '../../src/scheduler/agenda.js';
+import { registerRecurringJobs } from '../../src/scheduler/definitions.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
+
+function getDb() {
+  const db = mongoose.connection.db;
+  if (!db) throw new Error('no db connection');
+  return db;
+}
 
 const silentLogger = pino({ level: 'silent' });
 
@@ -107,6 +116,8 @@ describe('status API (integration)', () => {
         lastRunAt: null,
         lastRunStatus: null,
         stale: true,
+        nextRunAt: null,
+        disabled: false,
       });
     });
 
@@ -166,6 +177,32 @@ describe('status API (integration)', () => {
       expect(raw).not.toContain('test-worker');
       expect(raw).not.toContain('workerId');
       expect(raw).not.toContain('error');
+    });
+
+    // Spec system-status-api (fase 6): nextRunAt/disabled reflejan el
+    // documento recurrente real de poll-prices en agenda_jobs.
+    it('reports the recurring job nextRunAt once it is registered', async () => {
+      const bootstrapAgenda = createAgenda({ db: getDb(), role: 'worker' });
+      await registerRecurringJobs(bootstrapAgenda, getDb());
+
+      const app = createApp();
+      const response = await request(app).get('/api/v1/status');
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.pollPrices.nextRunAt).not.toBeNull();
+      expect(response.body.data.pollPrices.disabled).toBe(false);
+    });
+
+    it('reports disabled: true after an administrator disables poll-prices', async () => {
+      const bootstrapAgenda = createAgenda({ db: getDb(), role: 'worker' });
+      await registerRecurringJobs(bootstrapAgenda, getDb());
+      await bootstrapAgenda.disable({ name: JOB_NAMES.POLL_PRICES });
+
+      const app = createApp();
+      const response = await request(app).get('/api/v1/status');
+
+      expect(response.status).toBe(200);
+      expect(response.body.data.pollPrices.disabled).toBe(true);
     });
   });
 });

@@ -31,12 +31,32 @@ export async function stopInMemoryMongo(): Promise<void> {
   }
 }
 
-/** Elimina todos los documentos de cada colección para que cada test arranque desde una base limpia. */
+/**
+ * Elimina todos los documentos de cada colección para que cada test arranque
+ * desde una base limpia. Recorre las colecciones REALES de la base (`db.
+ * listCollections()`) en lugar de `mongoose.connection.collections`: esta
+ * última solo lista las colecciones que tienen un modelo de Mongoose
+ * registrado, y desde `agenda` (fase 6) `agenda_jobs`/`job_locks` — escritas
+ * por Agenda directamente con el driver nativo — no siempre tienen uno.
+ */
 export async function clearDatabase(): Promise<void> {
   if (mongoose.connection.readyState !== mongoose.ConnectionStates.connected) {
     return;
   }
 
-  const { collections } = mongoose.connection;
-  await Promise.all(Object.values(collections).map((collection) => collection.deleteMany({})));
+  const db = mongoose.connection.db;
+  if (!db) {
+    return;
+  }
+
+  const collections = await db.listCollections().toArray();
+  await Promise.all(
+    collections
+      // `system.views` y otras colecciones internas de Mongo no aceptan
+      // escrituras directas; las vistas tampoco son borrables (no tienen
+      // documentos propios).
+      .filter((collectionInfo) => !collectionInfo.name.startsWith('system.'))
+      .filter((collectionInfo) => collectionInfo.type !== 'view')
+      .map((collectionInfo) => db.collection(collectionInfo.name).deleteMany({})),
+  );
 }

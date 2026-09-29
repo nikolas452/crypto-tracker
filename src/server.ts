@@ -1,10 +1,12 @@
 import http from 'node:http';
+import mongoose from 'mongoose';
 import { assertCoinGeckoApiKey, assertFirebaseCredentials, config } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { connectDb, disconnectDb } from './db/connect.js';
 import { ensureCollections } from './db/ensureCollections.js';
 import { verifyReplicaSet } from './lib/verifyReplicaSet.js';
 import { createApp } from './app.js';
+import { createAgenda } from './scheduler/agenda.js';
 import { initializeFirebaseAdmin } from './integrations/firebase/admin.js';
 import { createFirebaseTokenVerifier } from './integrations/firebase/tokenVerifier.js';
 import { createCoinGeckoClient } from './integrations/coingecko/coingecko.client.js';
@@ -31,6 +33,19 @@ async function main(): Promise<void> {
   await verifyReplicaSet(logger);
   await ensureCollections(logger);
 
+  const db = mongoose.connection.db;
+  if (!db) {
+    logger.fatal('MongoDB connection has no db handle after connectDb(); refusing to start.');
+    process.exit(1);
+    return;
+  }
+
+  // Instancia PRODUCTORA (fase 6, tarea 10.1): la API encola trabajo con
+  // `agenda.now()`/`disable()`/`enable()` pero nunca llama a `start()`, así
+  // que nunca procesa un job dentro de un request (design.md).
+  const jobsAgenda = createAgenda({ db, role: 'producer' });
+  await jobsAgenda.ready;
+
   const firebaseApp = initializeFirebaseAdmin(config, logger);
   const tokenVerifier = createFirebaseTokenVerifier(firebaseApp);
 
@@ -46,7 +61,7 @@ async function main(): Promise<void> {
     logger,
   });
 
-  const app = createApp({ logger, tokenVerifier, coingecko });
+  const app = createApp({ logger, tokenVerifier, coingecko, db, agenda: jobsAgenda });
   const server = http.createServer(app);
 
   server.on('error', (err: NodeJS.ErrnoException) => {
