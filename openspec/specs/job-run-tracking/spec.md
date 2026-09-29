@@ -6,12 +6,12 @@ This capability defines the persistent shape of job run records, which capture t
 
 ### Requirement: JobRun document shape
 
-The system SHALL define a `job_runs` collection with `jobName` (string, one of `"poll-prices"` or `"send-notifications"`), `trigger` (enum `schedule`/`manual`/`startup`), `status` (enum `running`/`success`/`partial`/`failed`/`skipped`), `skipReason` (enum `overlap`/`no_active_coins`/null), `startedAt` (Date, required), `finishedAt` (Date or null), `durationMs` (number or null), a `stats` object, `error` (`{ code, message }` or null, never a full stack or secrets), and `workerId` (string, `hostname-pid`). For `poll-prices` the `stats` object SHALL contain `coinsRequested`, `coinsReturned`, `snapshotsInserted`, `skippedUnchanged`, `missingCoins`, `upstreamAttempts`, `latestUpdated`, `alertsEvaluated`, `alertsTriggered`, `alertsRearmed`, `alertsInCooldown` and `triggerConflicts`. For `send-notifications` it SHALL contain `claimed`, `sent`, `retried`, `failedPermanent`, `failedExhausted`, `cancelled` and `recoveredStale`.
+The system SHALL define a `job_runs` collection with `jobName` (string, one of `"poll-prices"`, `"send-notifications"` or `"maintenance"`), `trigger` (enum `schedule`/`manual`/`startup`/`agenda`/`retry`/`api`, where `schedule` is retained only for runs recorded before the move to Agenda), `status` (enum `running`/`success`/`partial`/`failed`/`skipped`), `skipReason` (enum `overlap`/`no_active_coins`/`locked`/null), `startedAt` (Date, required), `finishedAt` (Date or null), `durationMs` (number or null), `agendaJobId` (string or null), `attempt` (integer, default 1), a `stats` object, `error` (`{ code, message }` or null, never a full stack or secrets), and `workerId` (string, `hostname-pid`). For `poll-prices` the `stats` object SHALL contain `coinsRequested`, `coinsReturned`, `snapshotsInserted`, `skippedUnchanged`, `missingCoins`, `upstreamAttempts`, `latestUpdated`, `alertsEvaluated`, `alertsTriggered`, `alertsRearmed`, `alertsInCooldown` and `triggerConflicts`. For `send-notifications` it SHALL contain `claimed`, `sent`, `retried`, `failedPermanent`, `failedExhausted`, `cancelled` and `recoveredStale`.
 
 #### Scenario: JobRun document matches the fixed shape
 
 - **WHEN** a job run completes
-- **THEN** its document has `jobName`, `trigger`, `status`, `startedAt`, `finishedAt`, `durationMs`, `stats`, and `workerId`
+- **THEN** its document has `jobName`, `trigger`, `status`, `startedAt`, `finishedAt`, `durationMs`, `agendaJobId`, `attempt`, `stats`, and `workerId`
 
 #### Scenario: Stats report how many coins had their latest projection refreshed
 
@@ -27,3 +27,18 @@ The system SHALL define a `job_runs` collection with `jobName` (string, one of `
 
 - **WHEN** a `send-notifications` run claims 3 notifications and sends 2
 - **THEN** its `stats.claimed` is 3 and its `stats.sent` is 2
+
+#### Scenario: A scheduler-driven run is attributed to Agenda
+
+- **WHEN** the recurring `poll-prices` job runs
+- **THEN** its `trigger` is `"agenda"` and its `agendaJobId` identifies the Agenda document that produced it
+
+#### Scenario: A retry run carries its attempt number
+
+- **WHEN** the retry policy schedules a second attempt
+- **THEN** that run's `trigger` is `"retry"` and its `attempt` is 2
+
+#### Scenario: A lease-blocked run records why it was skipped
+
+- **WHEN** the polling job cannot acquire its lease
+- **THEN** the run's `status` is `"skipped"` with `skipReason: "locked"`

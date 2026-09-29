@@ -161,6 +161,7 @@ function createFakeJobRunsRepo(): JobRunsRepo & {
     async createSkipped() {
       return new Types.ObjectId();
     },
+    async attachAgendaMetadata() {},
     async recoverStaleRuns() {
       return 0;
     },
@@ -381,6 +382,7 @@ describe('createPollPricesJob', () => {
       createRunning: vi.fn().mockRejectedValue(new Error('mongo is down')),
       closeRun: vi.fn(),
       createSkipped: vi.fn(),
+      attachAgendaMetadata: vi.fn(),
       recoverStaleRuns: vi.fn(),
     };
 
@@ -404,6 +406,7 @@ describe('createPollPricesJob', () => {
       createRunning: vi.fn().mockResolvedValue(new Types.ObjectId()),
       closeRun: vi.fn().mockRejectedValue(new Error('mongo write failed')),
       createSkipped: vi.fn(),
+      attachAgendaMetadata: vi.fn(),
       recoverStaleRuns: vi.fn(),
     };
 

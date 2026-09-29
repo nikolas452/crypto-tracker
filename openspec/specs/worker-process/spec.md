@@ -20,7 +20,7 @@ The system SHALL require `COINGECKO_API_KEY` to be present when `worker.ts` star
 
 ### Requirement: Worker startup sequence
 
-The system SHALL implement `src/worker.ts` as a process entrypoint with no HTTP server, which on startup: validates configuration (including this entrypoint's required `COINGECKO_API_KEY` and `SMTP_HOST`), connects to MongoDB, verifies that the connection supports transactions and exits 1 when it does not, runs `ensureCollections()`, calls `mailer.verify()` without aborting on failure, recovers stale runs, validates the cron expressions, schedules both jobs, optionally runs the polling job once on start, and logs a startup summary.
+The system SHALL implement `src/worker.ts` as a process entrypoint with no HTTP server, which on startup: validates configuration (including this entrypoint's required `COINGECKO_API_KEY` and `SMTP_HOST`), connects to MongoDB, verifies that the connection supports transactions and exits 1 when it does not, runs `ensureCollections()`, calls `mailer.verify()` without aborting on failure, recovers stale runs, creates Agenda with `role: 'worker'`, registers the job definitions and event listeners, registers the recurring schedules with `every()`, cancels obsolete recurring documents, calls `await agenda.start()`, optionally enqueues one startup run of the polling job, and logs a startup summary.
 
 #### Scenario: Worker never opens an HTTP port
 
@@ -37,44 +37,35 @@ The system SHALL implement `src/worker.ts` as a process entrypoint with no HTTP 
 - **WHEN** `mailer.verify()` fails during startup
 - **THEN** an `error` is logged and the worker continues starting and scheduling jobs
 
-### Requirement: Cron scheduling in UTC
+#### Scenario: Startup completes quickly
 
-The system SHALL validate `POLL_PRICES_CRON` and `SEND_NOTIFICATIONS_CRON` with `cron.validate()`, exiting with code 1 if either is invalid, and SHALL schedule each job with `cron.schedule(expression, handler, { timezone: 'UTC', name: <job name> })`. If `POLL_PRICES_RUN_ON_START` is `true` (default), the polling job SHALL also run once immediately with `trigger: "startup"`.
+- **WHEN** the worker starts with Agenda
+- **THEN** startup completes in under 5 seconds
 
-#### Scenario: Invalid cron expression fails startup
+### Requirement: Startup run goes through the lease
 
-- **WHEN** either cron expression is not valid
-- **THEN** the worker exits with code 1 before scheduling anything
+When `POLL_PRICES_RUN_ON_START` is `true` (default), the system SHALL enqueue one immediate `poll-prices` job with `trigger: "startup"` rather than invoking the job directly, so the lease decides whether it actually executes.
 
-#### Scenario: Both jobs are scheduled in UTC
+#### Scenario: A startup run defers to a worker already polling
 
-- **WHEN** the worker starts successfully
-- **THEN** `poll-prices` and `send-notifications` are both scheduled with the UTC timezone
-
-### Requirement: In-memory overlap guard
-
-The system SHALL track an in-memory `isRunning` flag **per job**, so `poll-prices` and `send-notifications` guard each other independently. If a scheduled tick arrives while that job's flag is `true`, the system SHALL NOT execute the job, SHALL instead create a `JobRun` with `status: "skipped"` and `skipReason: "overlap"` (with equal `startedAt`/`finishedAt`), and SHALL log at `warn`. Each flag SHALL be released in a `finally` block so a job failure cannot leave it stuck.
-
-#### Scenario: Overlapping tick is skipped without calling CoinGecko
-
-- **WHEN** a scheduled tick arrives while the previous run of the same job is still in progress
-- **THEN** a `JobRun` with `status: "skipped"` and `skipReason: "overlap"` is created, and no CoinGecko call is made for that tick
-
-#### Scenario: One job running does not block the other
-
-- **WHEN** `poll-prices` is running and a `send-notifications` tick arrives
-- **THEN** `send-notifications` executes normally, because the guards are per job
+- **WHEN** a second worker starts while the first is running `poll-prices`
+- **THEN** the second worker's startup run is skipped with `skipReason: "locked"` instead of running concurrently
 
 ### Requirement: Ordered worker shutdown
 
-On `SIGTERM`/`SIGINT`, the system SHALL stop all cron tasks (`task.stop()`) so no new run starts, wait up to `WORKER_SHUTDOWN_TIMEOUT_MS` (default 30000) for any in-progress run of either job to finish, then disconnect MongoDB and exit with code 0. If the timeout elapses first, the system SHALL exit with code 1 without touching the in-progress run's document, leaving it for stale-run recovery on the next startup and, for a notification left in `sending`, for stale-lock recovery by the send job.
+On `SIGTERM`/`SIGINT`, the system SHALL call `agenda.drain(WORKER_SHUTDOWN_TIMEOUT_MS)` (default 30000) to wait for in-flight jobs to finish. If the result reports a timeout, the system SHALL log at `warn` how many jobs remained and call `agenda.stop()` to release their locks so another worker can retake them. It SHALL then disconnect MongoDB and exit.
 
 #### Scenario: In-progress run is allowed to finish before shutdown completes
 
 - **WHEN** `SIGTERM` is received while a run is in progress and it finishes within the timeout
-- **THEN** the process exits with code 0 only after that run's `JobRun` document is closed
+- **THEN** the process exits only after that run's `JobRun` document is closed, with exit code 0
 
-#### Scenario: A notification left locked by a killed worker is recovered later
+#### Scenario: A timed-out drain releases locks for another worker
 
-- **WHEN** the process exits on timeout while a notification is in `sending`
-- **THEN** that notification is left untouched and is returned to `pending` by the next run's stale-lock recovery
+- **WHEN** the drain timeout elapses with jobs still running
+- **THEN** a `warn` reports the remaining count, `agenda.stop()` releases their locks, and the work is retaken by the next worker rather than lost
+
+#### Scenario: A killed worker's lease expires
+
+- **WHEN** the platform kills the process before shutdown completes
+- **THEN** the Agenda lock expires after `lockLifetime` and the lease expires after its TTL, so the job becomes available again

@@ -441,3 +441,45 @@ Authorization: Bearer {{adminIdToken}}
 ### unavailable. Check http://localhost:8025 for the result.
 POST {{baseUrl}}/api/v1/admin/notifications/test-email
 Authorization: Bearer {{adminIdToken}}
+
+### ============================================================
+### Stage 6 (agenda): admin scheduler jobs (requireAuth + requireRole('admin'))
+### ============================================================
+
+### List the three recurring jobs with their schedule, next run and last outcome.
+GET {{baseUrl}}/api/v1/admin/jobs
+Authorization: Bearer {{adminIdToken}}
+
+### Same, also including one-off jobs (manual/api/retry runs) from the last 24h.
+GET {{baseUrl}}/api/v1/admin/jobs?includeOneOff=true
+Authorization: Bearer {{adminIdToken}}
+
+### An unknown job name -> 404 NOT_FOUND (E6-11).
+POST {{baseUrl}}/api/v1/admin/jobs/not-a-real-job/run
+Authorization: Bearer {{adminIdToken}}
+
+### Authenticated but not an admin -> 403 FORBIDDEN (E6-11).
+POST {{baseUrl}}/api/v1/admin/jobs/poll-prices/run
+Authorization: Bearer {{idToken}}
+
+### Trigger poll-prices now -> 202 Accepted with the enqueued job's id; the
+### actual run happens in whichever worker process picks it up within
+### AGENDA_PROCESS_EVERY, recorded as a JobRun with trigger: "api" (E6-10).
+POST {{baseUrl}}/api/v1/admin/jobs/poll-prices/run
+Authorization: Bearer {{adminIdToken}}
+
+### Triggering the same job again within 30 seconds -> 429 RATE_LIMITED.
+POST {{baseUrl}}/api/v1/admin/jobs/poll-prices/run
+Authorization: Bearer {{adminIdToken}}
+
+### Disable poll-prices: it stops running at its next scheduled time.
+POST {{baseUrl}}/api/v1/admin/jobs/poll-prices/disable
+Authorization: Bearer {{adminIdToken}}
+
+### Triggering a disabled job -> 409 CONFLICT.
+POST {{baseUrl}}/api/v1/admin/jobs/poll-prices/run
+Authorization: Bearer {{adminIdToken}}
+
+### Re-enable it.
+POST {{baseUrl}}/api/v1/admin/jobs/poll-prices/enable
+Authorization: Bearer {{adminIdToken}}

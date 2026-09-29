@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b6f2a1a0-6e3e-4b1a-9e7a-4f2c8f1c9d10",
     "name": "Crypto Tracker API",
-    "description": "Colección de la API de Crypto Tracker. Cubre endpoints públicos (Health, Coins, Price History, Price Stats, Status), endpoints de usuario autenticado (Me, My Watchlist, My Alerts, My Notifications) y endpoints de administrador (Admin - Job Runs, Admin - Coins, Admin - Notifications). Refleja los mismos casos que `requests.http`.\n\n**Orden general de uso:**\n1. Levantar el servidor con `npm run dev`.\n2. Para que Coins / Price History / Price Stats / Status devuelvan datos, sembrar el catálogo con `npm run seed:coins` y correr al menos un ciclo de `npm run job:poll-prices` (o dejar `npm run dev:worker` corriendo).\n3. Para cualquier endpoint autenticado, obtener un `idToken` desde la carpeta 'Auth (Firebase)' (ver esa carpeta para el detalle). No existe más el header `X-Admin-Key`: todo endpoint protegido exige un ID token de Firebase.\n4. Para los endpoints de Admin, además del `idToken`, hace falta un `adminIdToken` con el rol `admin` ya promovido en Mongo (ver carpeta 'Auth (Firebase)').\n5. Para 'My Alerts' y el envío real de mails, ver los requisitos adicionales en las carpetas 'My Alerts' y 'Admin - Notifications' (email verificado, Mailpit, variables SMTP).\n\nCada carpeta y cada request tienen su propia descripción con el detalle de qué necesitan antes de poder ejecutarse con éxito.",
+    "description": "Colección de la API de Crypto Tracker. Cubre endpoints públicos (Health, Coins, Price History, Price Stats, Status), endpoints de usuario autenticado (Me, My Watchlist, My Alerts, My Notifications) y endpoints de administrador (Admin - Job Runs, Admin - Coins, Admin - Notifications, Admin - Jobs). Refleja los mismos casos que `requests.http`.\n\n**Orden general de uso:**\n1. Levantar el servidor con `npm run dev`.\n2. Para que Coins / Price History / Price Stats / Status devuelvan datos, sembrar el catálogo con `npm run seed:coins` y correr al menos un ciclo de `npm run job:poll-prices` (o dejar `npm run dev:worker` corriendo).\n3. Para cualquier endpoint autenticado, obtener un `idToken` desde la carpeta 'Auth (Firebase)' (ver esa carpeta para el detalle). No existe más el header `X-Admin-Key`: todo endpoint protegido exige un ID token de Firebase.\n4. Para los endpoints de Admin, además del `idToken`, hace falta un `adminIdToken` con el rol `admin` ya promovido en Mongo (ver carpeta 'Auth (Firebase)').\n5. Para 'My Alerts' y el envío real de mails, ver los requisitos adicionales en las carpetas 'My Alerts' y 'Admin - Notifications' (email verificado, Mailpit, variables SMTP).\n\nCada carpeta y cada request tienen su propia descripción con el detalle de qué necesitan antes de poder ejecutarse con éxito.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -2577,6 +2577,255 @@
               ]
             },
             "description": "Envía un mail de prueba de forma inmediata al propio email del admin que llama, sin pasar por el outbox (no crea ningún documento de notificación). 200 con un messageId si sale bien, o 502 UPSTREAM_ERROR (details.reason trae el código del mailer) si SMTP no está disponible. Depende de `adminIdToken` y de que el servidor tenga SMTP_*/MAIL_FROM configurados y Mailpit corriendo (`docker compose up`); revisar el resultado en http://localhost:8025."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Jobs",
+      "description": "Administración del scheduler (etapa 6, Agenda), solo para administradores. Necesita `adminIdToken` de una cuenta con role=admin ya promovido en Mongo. Estos endpoints solo ENCOLAN trabajo o cambian el estado de un job (habilitado/deshabilitado) - nunca lo ejecutan dentro del request: la ejecución real la hace el proceso del worker (`npm run dev:worker`), que tiene que estar corriendo para que un disparo manual efectivamente produzca un JobRun. Los tres nombres válidos son poll-prices, send-notifications y maintenance.",
+      "item": [
+        {
+          "name": "List jobs - non-admin token -> 403",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{idToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs"
+              ]
+            },
+            "description": "Prueba de error: un token válido cuyo rol en Mongo sigue siendo 'user' devuelve 403 FORBIDDEN. Depende de `idToken` de una cuenta sin rol admin."
+          }
+        },
+        {
+          "name": "List recurring jobs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs"
+              ]
+            },
+            "description": "Lista los tres jobs recurrentes (poll-prices, send-notifications, maintenance) con su schedule, nextRunAt, failCount/failReason/failedAt, lockedAt, disabled y el JobRun más reciente de cada uno (status + finishedAt). Si todavía no corrió ningún worker, nextRunAt puede venir null. Depende de `adminIdToken`."
+          }
+        },
+        {
+          "name": "List jobs including one-off (last 24h)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs?includeOneOff=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs"
+              ],
+              "query": [
+                {
+                  "key": "includeOneOff",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "Igual que el listado anterior, agregando además los jobs puntuales (disparos manuales, reintentos de poll-prices, el send-notifications que dispara una alerta) creados en las últimas 24 horas. Depende de `adminIdToken`."
+          }
+        },
+        {
+          "name": "Trigger a job now",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs/poll-prices/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs",
+                "poll-prices",
+                "run"
+              ]
+            },
+            "description": "Encola una corrida de poll-prices ahora mismo: 202 Accepted con { agendaJobId, name, queuedAt } - el trabajo todavía no pasó, ocurre en el worker dentro de AGENDA_PROCESS_EVERY (10s por defecto) más lo que tarde en ejecutar. El JobRun resultante queda con trigger: \"api\". Depende de `adminIdToken`; para ver el JobRun aparecer hace falta un worker corriendo (`npm run dev:worker`)."
+          }
+        },
+        {
+          "name": "Trigger again within 30s -> 429",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs/poll-prices/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs",
+                "poll-prices",
+                "run"
+              ]
+            },
+            "description": "Prueba de error: disparar el mismo job dos veces en menos de 30 segundos devuelve 429 RATE_LIMITED - un tope fijo por nombre de job, pensado para proteger la cuota de CoinGecko de disparos manuales repetidos. Correr esto justo después de 'Trigger a job now'. Depende de `adminIdToken`."
+          }
+        },
+        {
+          "name": "Trigger an unknown job -> 404",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs/not-a-real-job/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs",
+                "not-a-real-job",
+                "run"
+              ]
+            },
+            "description": "Prueba de error: un nombre de job que no es poll-prices, send-notifications ni maintenance devuelve 404 NOT_FOUND. Depende de `adminIdToken`."
+          }
+        },
+        {
+          "name": "Disable a job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs/poll-prices/disable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs",
+                "poll-prices",
+                "disable"
+              ]
+            },
+            "description": "Deshabilita poll-prices: 200 con { name, disabled: true }. Deja de correr en su próximo horario programado, incluso después de reiniciar el worker - el registro idempotente al arrancar respeta este flag en lugar de reactivarlo. Depende de `adminIdToken`."
+          }
+        },
+        {
+          "name": "Trigger a disabled job -> 409",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs/poll-prices/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs",
+                "poll-prices",
+                "run"
+              ]
+            },
+            "description": "Prueba de error: disparar manualmente un job que está deshabilitado devuelve 409 CONFLICT. Depende de `adminIdToken` y de haber corrido antes 'Disable a job'."
+          }
+        },
+        {
+          "name": "Enable a job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminIdToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/admin/jobs/poll-prices/enable",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "admin",
+                "jobs",
+                "poll-prices",
+                "enable"
+              ]
+            },
+            "description": "Vuelve a habilitar poll-prices: 200 con { name, disabled: false }; corre de nuevo en su próximo horario programado. Depende de `adminIdToken` y de haber corrido antes 'Disable a job'."
           }
         }
       ]

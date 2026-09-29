@@ -1,5 +1,7 @@
 import express, { type Express } from 'express';
 import helmet from 'helmet';
+import mongoose from 'mongoose';
+import type { Db } from 'mongodb';
 import type { Logger } from 'pino';
 import { config, type Config } from './config/env.js';
 import { requestId } from './middlewares/requestId.js';
@@ -20,6 +22,8 @@ import { createCoinsRouter } from './modules/coins/coins.routes.js';
 import { createAdminCoinsRouter } from './modules/coins/coins.admin.routes.js';
 import { createStatusRouter } from './modules/status/status.routes.js';
 import { createJobRunsRouter } from './modules/job-runs/job-runs.routes.js';
+import { createAdminJobsRouter } from './modules/jobs/jobs.admin.routes.js';
+import { createLazyAgenda, type AgendaProducerHandle } from './scheduler/agenda.js';
 import { createUsersRouter } from './modules/users/users.routes.js';
 import { createWatchlistRouter } from './modules/watchlist/watchlist.routes.js';
 import { createNotificationsRouter } from './modules/notifications/notifications.routes.js';
@@ -118,6 +122,25 @@ export interface CreateAppDeps {
    * inyectan `createFakeTokenVerifier(...)` en `tokenVerifier`.
    */
   readonly mailer?: Mailer;
+  /**
+   * Handle de Mongo (fase 6), usado por `GET /api/v1/status` y por
+   * `GET /api/v1/admin/jobs` para leer el estado de los documentos
+   * recurrentes de `agenda_jobs`. Por defecto, `mongoose.connection.db` — ya
+   * disponible en todo caller real (`server.ts` siempre conecta antes de
+   * llamar a `createApp`) y en todo test de integración (que levanta el
+   * Mongo en memoria en su `beforeAll`).
+   */
+  readonly db?: Db;
+  /**
+   * Instancia PRODUCTORA de Agenda (spec agenda-scheduler / admin-jobs-api),
+   * usada por `POST /api/v1/admin/jobs/:name/{run,disable,enable}` para
+   * encolar o (des)habilitar trabajo sin procesarlo nunca — la API nunca
+   * llama a `agenda.start()`. Por defecto, una variante perezosa
+   * (`createLazyAgenda`) que no construye la instancia real hasta el primer
+   * uso efectivo — así un test que nunca toca `/admin/jobs` no abre una
+   * conexión de Agenda redundante contra el Mongo compartido.
+   */
+  readonly agenda?: AgendaProducerHandle;
 }
 
 /**
@@ -148,6 +171,18 @@ export function createApp(deps: CreateAppDeps = {}): Express {
   const tokenVerifier = deps.tokenVerifier ?? createLazyFirebaseTokenVerifier();
   const coingecko = deps.coingecko ?? createLazyCoinGeckoClient();
   const mailer = deps.mailer ?? createSmtpMailer();
+  // Resuelto perezosamente (nunca acá, al construir la app): igual que
+  // `tokenVerifier`/`coingecko`, esto deja que un test que nunca toca
+  // `/status` ni `/admin/jobs` construya la app sin una conexión de Mongo
+  // abierta todavía.
+  function requireDb(): Db {
+    const db = deps.db ?? mongoose.connection.db;
+    if (!db) {
+      throw new Error('MongoDB connection is not open');
+    }
+    return db;
+  }
+  const agenda = deps.agenda ?? createLazyAgenda(() => ({ db: requireDb(), role: 'producer' }));
   // El chequeo `coingecko` solo se agrega cuando `COINGECKO_READINESS_ENABLED`
   // está habilitado (spec health-checks: "deshabilitado por defecto") — así
   // una caída de CoinGecko nunca saca a la API de rotación por sí sola.
@@ -188,7 +223,7 @@ export function createApp(deps: CreateAppDeps = {}): Express {
 
   // Cache-Control se monta junto a cada router (spec http-caching).
   app.use('/api/v1/coins', cacheControlPublic(60), createCoinsRouter());
-  app.use('/api/v1/status', cacheControlNoStore, createStatusRouter());
+  app.use('/api/v1/status', cacheControlNoStore, createStatusRouter(requireDb));
 
   // `/me`: sin Cache-Control propio (spec me-endpoints no lo pide); cada
   // verbo llama a requireAuth con sus propias opciones dentro del router
@@ -238,6 +273,8 @@ export function createApp(deps: CreateAppDeps = {}): Express {
     requireRole('admin'),
   );
   app.use('/api/v1/admin/job-runs', createJobRunsRouter());
+  // Fase 6: listar/disparar/(des)habilitar los tres jobs de Agenda (spec admin-jobs-api).
+  app.use('/api/v1/admin/jobs', createAdminJobsRouter(agenda, requireDb));
   // RF-4.6: alta/reactivación/activación de monedas, validadas contra
   // CoinGecko con el cliente inyectado (deps.coingecko / tarea 1.2).
   app.use('/api/v1/admin/coins', createAdminCoinsRouter(coingecko));

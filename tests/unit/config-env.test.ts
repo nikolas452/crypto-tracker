@@ -47,6 +47,13 @@ describe('parseEnv', () => {
       NOTIFY_MAX_ATTEMPTS: 5,
       NOTIFY_LOCK_TIMEOUT_MIN: 10,
       NOTIFICATIONS_RETENTION_DAYS: 90,
+      SCHEDULER: 'agenda',
+      AGENDA_PROCESS_EVERY: '10 seconds',
+      AGENDA_MAX_CONCURRENCY: 5,
+      AGENDA_ONE_OFF_RETENTION_DAYS: 7,
+      MAINTENANCE_CRON: '15 3 * * *',
+      POLL_LOCK_TTL_MS: 300000,
+      POLL_MAX_JOB_RETRIES: 1,
     });
   });
 

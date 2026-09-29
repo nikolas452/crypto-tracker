@@ -70,6 +70,23 @@ instead of a production provider. See "API endpoints (Stage 5 — alerts &
 notifications)" below for the full contract and "Known limitations" for the
 trade-offs this stage accepts deliberately.
 
+**Stage 6 ("agenda")** moves the schedule itself off the worker process's
+memory and into MongoDB (`agenda_jobs`), using [Agenda](https://github.com/agenda/agenda)
+6 instead of `node-cron`. This closes the three gaps Stage 1 explicitly
+deferred: a manual `job:poll-prices` run can no longer collide with the
+worker's (both now go through the same hand-built lease,
+`src/lib/lease-lock.ts`), two workers coordinate through Agenda's own
+per-document locking plus that lease instead of duplicating work, and a new
+`GET`/`POST /api/v1/admin/jobs*` surface can list, trigger, disable and
+enable any of the three jobs (`poll-prices`, `send-notifications`, and a new
+daily `maintenance` job) from outside the worker process entirely. An
+explicit retry policy gives `poll-prices` one delayed retry on a transient
+CoinGecko failure; `GET /api/v1/status` now also reports the polling job's
+`nextRunAt` and `disabled` flag. See "Background worker (Stage 6 — Agenda)"
+and "API endpoints (Stage 6 — Agenda admin jobs)" below for the full
+contract, and "Known limitations" for the divergences this stage found
+against Agenda 6.2.6's actual (rather than documented) behavior.
+
 ## Requirements
 
 - Node.js **24.x** (see `.node-version`). `engines.node` in `package.json` enforces
@@ -129,8 +146,8 @@ trade-offs this stage accepts deliberately.
 | `COINGECKO_MAX_RETRIES`       | integer                                 | No                           | `2`                                              | 0–5                                                                                                                                                                                                                                                                                                                                            |
 | `COINGECKO_MAX_IDS_PER_CALL`  | integer                                 | No                           | `50`                                             | 1–250                                                                                                                                                                                                                                                                                                                                          |
 | `COINGECKO_READINESS_ENABLED` | boolean                                 | No                           | `false`                                          | Adds an optional `coingecko` entry to `GET /health/ready`. Disabled by default: an upstream CoinGecko outage should never take the API out of a deploy platform's rotation, since the read endpoints never call CoinGecko                                                                                                                      |
-| `POLL_PRICES_CRON`            | cron expression                         | No                           | `*/10 * * * *`                                   | Validated with `cron.validate()`; runs in UTC                                                                                                                                                                                                                                                                                                  |
-| `POLL_PRICES_RUN_ON_START`    | boolean                                 | No                           | `true`                                           | Also runs the job once (`trigger: "startup"`) when the worker boots                                                                                                                                                                                                                                                                            |
+| `POLL_PRICES_CRON`            | cron expression                         | No                           | `*/10 * * * *`                                   | Since Stage 6, registered through Agenda's `every()`, still evaluated in UTC; an invalid expression is reported by Agenda at registration (`nextRunAt: null`) rather than by `cron.validate()`, and the worker still fails fast on it                                                                                                        |
+| `POLL_PRICES_RUN_ON_START`    | boolean                                 | No                           | `true`                                           | Enqueues one `poll-prices` job with `trigger: "startup"` when the worker boots — the lease still decides whether it actually runs                                                                                                                                                                                                             |
 | `SNAPSHOT_RETENTION_DAYS`     | integer \| empty                        | No                           | `90`                                             | TTL for `price_snapshots`; empty = no expiration                                                                                                                                                                                                                                                                                               |
 | `JOB_RUNS_RETENTION_DAYS`     | integer                                 | No                           | `30`                                             | TTL for `job_runs`                                                                                                                                                                                                                                                                                                                             |
 | `STALE_RUN_THRESHOLD_MIN`     | integer                                 | No                           | `15`                                             | A `running` `JobRun` older than this is recovered as `failed`/`STALE` on worker startup                                                                                                                                                                                                                                                        |
@@ -155,11 +172,18 @@ trade-offs this stage accepts deliberately.
 | `MAIL_DISPLAY_TIMEZONE`       | string                                  | No                           | `America/Argentina/Buenos_Aires`                 | IANA timezone shown in the email body alongside the UTC timestamp that's always included too                                                                                                                                                                                                                                                    |
 | `MAIL_MAX_PER_MINUTE`         | integer                                 | No                           | `30`                                              | Caps how many notifications `send-notifications` sends per run; the rest wait for the next run                                                                                                                                                                                                                                                  |
 | `ALERTS_MAX_ACTIVE`           | integer                                 | No                           | `20`                                              | Per-user cap on alerts in `armed`+`triggered` (spec alert-store); enforced on creation and on re-enabling a disabled alert                                                                                                                                                                                                                      |
-| `SEND_NOTIFICATIONS_CRON`     | cron expression                         | No                           | `* * * * *`                                      | Validated with `cron.validate()` at worker startup; runs in UTC                                                                                                                                                                                                                                                                                  |
+| `SEND_NOTIFICATIONS_CRON`     | cron expression                         | No                           | `* * * * *`                                      | Same Agenda registration as `POLL_PRICES_CRON` since Stage 6; still UTC                                                                                                                                                                                                                                                                         |
 | `NOTIFY_BATCH_SIZE`           | integer                                 | No                           | `20`                                              | Notifications claimed per `send-notifications` run                                                                                                                                                                                                                                                                                               |
 | `NOTIFY_MAX_ATTEMPTS`         | integer                                 | No                           | `5`                                               | Attempts allowed before a transient failure becomes permanently `failed`                                                                                                                                                                                                                                                                         |
 | `NOTIFY_LOCK_TIMEOUT_MIN`     | integer                                 | No                           | `10`                                              | Age after which a `sending` lock is considered stale and recovered by another run; also the bound on the at-least-once duplicate window — see "Known limitations" below                                                                                                                                                                        |
 | `NOTIFICATIONS_RETENTION_DAYS`| integer                                 | No                           | `90`                                              | TTL for the `notifications` collection                                                                                                                                                                                                                                                                                                            |
+| `SCHEDULER`                   | string                                  | No                           | `agenda`                                          | Documented future extension point; `"agenda"` is the only supported value today (`node-cron` was removed, not kept behind a switch)                                                                                                                                                                                                              |
+| `AGENDA_PROCESS_EVERY`        | interval string or ms                   | No                           | `10 seconds`                                      | How often Agenda polls `agenda_jobs` for due work; introduces scheduling latency up to this value. **Never write a bare `"N milliseconds"` string here or anywhere Agenda parses an interval** — its `human-interval` dependency matches the `second` substring inside `milliseconds` and silently misreads it as `N` **seconds**; pass a plain millisecond number instead |
+| `AGENDA_MAX_CONCURRENCY`      | integer                                 | No                           | `5`                                                | Max jobs Agenda processes concurrently in one worker process, across all job names                                                                                                                                                                                                                                                                |
+| `AGENDA_ONE_OFF_RETENTION_DAYS`| integer                                | No                           | `7`                                                | Days a finished non-recurring `agenda_jobs` document (created by `agenda.now()`/`.schedule()`) is kept before the `maintenance` job prunes it                                                                                                                                                                                                    |
+| `MAINTENANCE_CRON`            | cron expression                         | No                           | `15 3 * * *`                                      | Daily housekeeping job: recovers stale `job_runs`, prunes finished one-off `agenda_jobs` documents, and warns about recent notification failures and stale polling. UTC, via Agenda's `every()`                                                                                                                                                  |
+| `POLL_LOCK_TTL_MS`            | integer                                 | No                           | `300000`                                          | TTL of the `poll-prices` lease (`src/lib/lease-lock.ts`); bounds how long a dead holder can block the resource                                                                                                                                                                                                                                    |
+| `POLL_MAX_JOB_RETRIES`        | integer                                 | No                           | `1`                                                | Extra retries allowed after a transient `poll-prices` failure (`COINGECKO_UNAVAILABLE`, `COINGECKO_RATE_LIMITED`, `ALERT_EVALUATION_FAILED`) before giving up; `COINGECKO_AUTH`/`INTERNAL` are never retried, and a retry is suppressed when the next recurring run is under 3 minutes away                                                    |
 
 `src/config/env.ts` is the **only** module allowed to read `process.env` (enforced
 by an ESLint `no-restricted-properties` rule). Every other module imports the
@@ -199,22 +223,47 @@ endpoints (Stage 2)" below.
 | `npm run perf:watchlist`        | Seeds one user with 50 watchlist items and measures RNF-4.1 latency for `GET /api/v1/me/watchlist` (Stage 4) — see "Performance (RNF-4.1)" below                                                                       |
 | `npm run perf:alerts-evaluation`| Seeds 1,000 alerts across 10 coins (none triggering) and measures RNF-5.1 latency for `evaluateAlerts`, the alert-evaluation step inside `poll-prices` (Stage 5) — see "Performance (RNF-5.1)" below                    |
 
-## Background worker (Stage 1)
+## Background worker (Stage 6 — Agenda)
 
 The worker (`src/worker.ts`) is a **separate process** from the API. Since
-Stage 5 (alertas-email) it schedules **two** independent jobs, each with its
-own cron expression and its own in-memory overlap guard — an overlap on one
-never blocks or gets confused with the other's:
+Stage 6, its schedule lives in MongoDB (`agenda_jobs`, via
+[Agenda](https://github.com/agenda/agenda) 6) instead of in the process's own
+memory: it survives a restart, is visible from outside the worker (see "API
+endpoints (Stage 6 — Agenda admin jobs)" below), and is safe with two workers
+running at once. The worker is the only process that constructs Agenda with
+`role: "worker"` — it defines all three jobs, registers them as recurring,
+and calls `agenda.start()`; the API constructs it with `role: "producer"`
+and never calls `start()`, so it can enqueue work but never execute it.
 
-- **`poll-prices`** — polls CoinGecko for prices on a schedule and stores
-  them as a time series, then evaluates every `armed` alert against the
-  coins that just updated (see "API endpoints (Stage 5 — alerts &
-  notifications)" below).
+Three jobs are scheduled:
+
+- **`poll-prices`** — polls CoinGecko for prices and stores them as a time
+  series, then evaluates every `armed` alert against the coins that just
+  updated (see "API endpoints (Stage 5 — alerts & notifications)" below).
+  Guarded by a hand-built lease (`src/lib/lease-lock.ts`, `POLL_LOCK_TTL_MS`)
+  in addition to Agenda's own per-name locking — Agenda's `lockLimit` bounds
+  how many jobs **of the same name** one instance runs at once, but does
+  nothing to stop a recurring document and a one-off one (or two workers)
+  from running the same job concurrently, which is exactly the gap the lease
+  closes. A held lease records `status: "skipped"`, `skipReason: "locked"`
+  and makes no CoinGecko call.
 - **`send-notifications`** — claims and sends any `pending` notification the
   evaluation step queued, over SMTP, with retry and backoff. `poll-prices`
-  also triggers it immediately (fire-and-forget, through its own overlap
-  guard) whenever a run causes at least one alert to fire, instead of
-  waiting for its own next tick.
+  also triggers it immediately (fire-and-forget, via `agenda.now()`)
+  whenever a run causes at least one alert to fire, instead of waiting for
+  its own next tick. It deliberately has **no** lease: its atomic
+  per-notification claim (`pending` → `sending` in one `findOneAndUpdate`)
+  already guarantees each notification is sent once no matter how many
+  copies of the job run, so a lease would only serialize work that is
+  already safe to parallelize.
+- **`maintenance`** (new in Stage 6) — a daily, low-priority job with four
+  independent steps that never block each other: recovers `job_runs` still
+  `running` past `STALE_RUN_THRESHOLD_MIN` (the same check the worker runs
+  once at startup, now also run daily), prunes non-recurring `agenda_jobs`
+  documents finished more than `AGENDA_ONE_OFF_RETENTION_DAYS` ago, and logs
+  a `warn` for notifications that failed in the last 24 hours and for a
+  stale `poll-prices` (same rule `GET /api/v1/status` uses). It is never
+  retried — see "Known limitations" below for why.
 
 It needs its own CoinGecko API key, valid SMTP settings and, before it has
 anything to poll, a seeded coin catalog.
@@ -241,28 +290,27 @@ anything to poll, a seeded coin catalog.
    npm run dev:worker
    ```
 
-   On success you should see a startup log with `workerId`, both cron
-   expressions (`pollPricesCron`, `sendNotificationsCron`), and the active
-   coin count, followed by one `poll-prices` run
-   (`POLL_PRICES_RUN_ON_START` defaults to `true`) and then one run every
-   `POLL_PRICES_CRON` interval (default: every 10 minutes, UTC).
-   `send-notifications` starts on its own schedule right away
-   (`SEND_NOTIFICATIONS_CRON` default: every minute, UTC) — it simply finds
-   nothing `pending` to claim until an alert actually triggers.
+   On success you should see a startup log with `workerId` and both cron
+   expressions (`pollPricesCron`, `sendNotificationsCron`), followed by one
+   `poll-prices` run through the lease (`POLL_PRICES_RUN_ON_START` defaults
+   to `true`) and then one run every `POLL_PRICES_CRON` interval (default:
+   every 10 minutes, UTC) — up to `AGENDA_PROCESS_EVERY` (default 10s) of
+   scheduling latency on top of that. `send-notifications` starts on its own
+   schedule right away (`SEND_NOTIFICATIONS_CRON` default: every minute,
+   UTC) — it simply finds nothing `pending` to claim until an alert actually
+   triggers. `maintenance` runs once daily (`MAINTENANCE_CRON` default
+   03:15 UTC).
 
-4. To run the job once without the scheduler:
+4. To run the polling job once without the scheduler:
 
    ```bash
    npm run job:poll-prices
    ```
 
-   **Overlap caveat:** this script does **not** coordinate with the worker's
-   in-memory overlap guard — that flag only exists inside the worker
-   process's memory. If you run this while the worker is mid-tick, both may
-   execute concurrently. This is a documented limitation, not a bug: the
-   job's own deduplication (by `sourceUpdatedAt`, one aggregation per run)
-   prevents duplicate snapshot data even if both runs overlap. Real
-   cross-process locking is deferred to Stage 6 (Agenda).
+   Since Stage 6 this acquires the same lease the worker uses: if the worker
+   is mid-tick, the script records `status: "skipped"`, `skipReason:
+   "locked"` and exits 0 instead of racing it — the overlap limitation
+   documented through Stage 5 no longer applies.
 
 ### CoinGecko quota
 
@@ -534,7 +582,9 @@ required. `Cache-Control: no-store`.
       "lastSuccessAt": "2026-09-23T11:50:00.000Z",
       "lastRunAt": "2026-09-23T11:50:00.000Z",
       "lastRunStatus": "success",
-      "stale": false
+      "stale": false,
+      "nextRunAt": "2026-09-23T12:00:00.000Z",
+      "disabled": false
     }
   }
 }
@@ -542,8 +592,10 @@ required. `Cache-Control: no-store`.
 
 `pollPrices.stale` is `true` when no `success`/`partial` run finished within
 `STALE_POLL_THRESHOLD_MIN` minutes, including the case where no run has ever
-completed. The response deliberately never includes an error message, code or
-worker id — only whether the worker is alive.
+completed. `nextRunAt` and `disabled` (Stage 6) read the recurring `poll-prices`
+document in `agenda_jobs`; `nextRunAt` is `null` until a worker has registered
+the job at least once. The response deliberately never includes an error
+message, code or worker id — only whether the worker is alive.
 
 ### `GET`, `PATCH`, `DELETE /api/v1/me`
 
@@ -647,6 +699,76 @@ X-Admin-Key: <your ADMIN_API_KEY>
 `GET /api/v1/admin/job-runs/:id` returns that same document shape at `data`
 (not wrapped in `{ data, meta }`); `400 VALIDATION_ERROR` for a malformed id,
 `404 NOT_FOUND` for an unknown one.
+
+**Since Stage 6**, a `JobRun` document also carries `agendaJobId` (the Agenda
+document that produced it, `null` for pre-Stage-6 history) and `attempt`
+(`1`, or `2` for the retry policy's single retry). `trigger` gains `agenda`,
+`retry` and `api` (`schedule` is kept only on runs recorded before this
+stage); `skipReason` gains `locked`, recorded when the `poll-prices` lease
+was held by another owner.
+
+## API endpoints (Stage 6 — Agenda admin jobs)
+
+Same guard as job-runs: `requireAuth({ checkRevoked: true })` +
+`requireRole('admin')`, `Cache-Control: no-store`. Backed by Agenda's
+**producer** instance — these endpoints enqueue or (des)habilitan work, they
+never execute a job inside the request; a job enqueued while no worker is
+running simply waits (see E6-14 in the test suite).
+
+### `GET /api/v1/admin/jobs`
+
+Lists the three recurring jobs with their schedule and last outcome.
+`?includeOneOff=true` additionally lists one-off jobs (manual triggers,
+retries, the alert-triggered `send-notifications` dispatch) from the last 24
+hours.
+
+```json
+{
+  "data": {
+    "recurring": [
+      {
+        "name": "poll-prices",
+        "schedule": "*/10 * * * *",
+        "nextRunAt": "2026-09-23T12:00:00.000Z",
+        "lastRunAt": "2026-09-23T11:50:00.000Z",
+        "lastFinishedAt": "2026-09-23T11:50:02.150Z",
+        "failCount": 0,
+        "failReason": null,
+        "failedAt": null,
+        "lockedAt": null,
+        "disabled": false,
+        "lastJobRun": { "status": "success", "finishedAt": "2026-09-23T11:50:02.150Z" }
+      }
+    ]
+  }
+}
+```
+
+### `POST /api/v1/admin/jobs/:name/run`
+
+Enqueues `name` (one of `poll-prices`, `send-notifications`, `maintenance`)
+with `data: { trigger: "api", userId: <calling admin's id> }` and responds
+**`202 Accepted`** — not `200`: the work has not happened yet, it will within
+`AGENDA_PROCESS_EVERY` plus execution time, once a worker picks it up.
+
+```json
+{ "data": { "agendaJobId": "651f...", "name": "poll-prices", "queuedAt": "2026-09-23T11:59:58.000Z" } }
+```
+
+- An unknown `name` (not in the three above) → `404 NOT_FOUND`.
+- A non-admin caller → `403 FORBIDDEN`.
+- The job is currently disabled → `409 CONFLICT`.
+- More than one trigger for the same job name within 30 seconds →
+  `429 RATE_LIMITED` — a fixed per-job-name budget, protecting the CoinGecko
+  quota from repeated manual triggers.
+
+### `POST /api/v1/admin/jobs/:name/disable` and `POST /api/v1/admin/jobs/:name/enable`
+
+`200 { "data": { "name": "poll-prices", "disabled": true } }`. A disabled job
+does not execute even when its next scheduled run passes, and — this is the
+non-obvious part — restarting the worker does **not** silently re-enable it:
+the idempotent `every()` registration on startup checks the current
+`disabled` flag first and restores it after re-registering the schedule.
 
 ## API endpoints (Stage 4 — watchlists)
 
@@ -1204,9 +1326,50 @@ vary with hardware.
 
 ## Known limitations
 
-Three behaviors below are accepted, documented trade-offs (see `design.md`'s
-"Risks / Trade-offs") rather than bugs:
+The behaviors below are accepted, documented trade-offs (see each stage's
+`design.md` "Risks / Trade-offs") rather than bugs:
 
+- **Agenda 6.2.6's `stop()` does not release the lock of a job that is
+  actually running — only ones queued locally but not yet started** (see
+  `JobProcessor.stop()`: "Running jobs keep their database locks until they
+  complete or the lock expires"). The worker's shutdown sequence still calls
+  `agenda.drain(WORKER_SHUTDOWN_TIMEOUT_MS)` then `agenda.stop()` on a
+  timeout, matching the source requirement's stated intent, but the literal
+  recovery mechanism for a job still in flight when the process exits is
+  always `lockLifetime` expiry (5 minutes for `poll-prices`/
+  `send-notifications`, 15 for `maintenance`) plus the lease's own TTL —
+  whether `stop()` was called or the process was killed outright makes no
+  difference. This is documented here because it's a real divergence from
+  what the wording of the requirement this stage implements suggests, found
+  and confirmed by reading Agenda's source directly.
+- **Never write a bare `"N milliseconds"` interval string anywhere Agenda
+  parses one** (`AGENDA_PROCESS_EVERY`, `agenda.processEvery()`,
+  `agenda.every()`'s interval argument). Agenda's `human-interval` dependency
+  matches on the substring `second` and would read `"200 milliseconds"` as
+  **200 seconds** — an easy, silent 1000x error found while writing this
+  stage's own tests. Pass a plain millisecond number (`agenda.processEvery(200)`)
+  instead; multi-unit strings like `"10 seconds"` are unaffected.
+- **A rolling restart can briefly run the previous cron expression.**
+  Because `every()`'s idempotent upsert means "whichever worker called it
+  last defines the schedule," during a rolling deploy the last instance
+  still running the old code can re-register the old `POLL_PRICES_CRON`/
+  `SEND_NOTIFICATIONS_CRON`/`MAINTENANCE_CRON` after a newer instance already
+  registered the new one, for as long as both are up. The window is bounded
+  by the deployment itself, and one cycle at the wrong interval has no
+  lasting effect — accepted rather than solved with a version-stamped
+  registration.
+- **`send-notifications` and `maintenance` are never retried on failure**,
+  unlike `poll-prices`. They rely on their own next scheduled run instead:
+  `send-notifications`'s atomic per-notification claim makes a bare re-run
+  exactly as safe as a dedicated retry, and `maintenance` is a once-daily
+  housekeeping job where a failure today simply tries again tomorrow — a
+  retry listener for either would be complexity with no correctness benefit.
+- **Verified, not a limitation:** `@agendajs/mongo-backend`'s peer dependency
+  on the MongoDB driver could in principle mismatch Mongoose's own — `npm ls
+  mongodb` was checked before wiring the shared connection and confirmed
+  mongoose 9.10.1 resolves `mongodb@7.6.0`, which satisfies `@agendajs/mongo-backend@4.0.3`'s
+  `^6.0.0 || ^7.0.0` requirement (alongside its exact `agenda@6.2.6` peer).
+  Agenda shares the existing connection; no second connection was needed.
 - **A duplicate email is possible.** Delivery is at-least-once, not
   exactly-once: if the worker process dies between a successful SMTP handoff
   and the write that marks the notification `sent`, another run's stale-lock
@@ -1367,6 +1530,41 @@ This one can't be reliably automated and is verified by hand:
      other secret.
 4. Stop the worker with `Ctrl+C` (`SIGINT`) and confirm it logs
    `shutdown iniciado`, waits for any in-progress run, and exits cleanly.
+
+### E6-6 — two workers, 30 minutes, no overlapping `poll-prices` (Compass)
+
+Verifies that Agenda's own locking plus the lease genuinely prevent two
+workers from running the same job concurrently — the automated suite covers
+the same mechanism against a single test process's two in-memory Agenda
+instances (`tests/integration/schedulerAdapters.test.ts`), but only a real
+30-minute run with two OS processes confirms it end-to-end.
+
+1. Set a real `COINGECKO_API_KEY` in `.env`, run `npm run seed:coins`, and
+   make sure MongoDB is running as a replica set (`docker compose up -d`).
+2. Start two worker processes against the **same** `MONGODB_URI`, in two
+   terminals: `npm run dev:worker` in each.
+3. Let both run for at least 30 minutes, then inspect `job_runs` in Compass
+   (or `mongosh`) filtered to `jobName: "poll-prices"`:
+   - No two `status: "success"` documents have overlapping
+     `[startedAt, finishedAt]` ranges.
+   - Some runs from the second worker to reach a given tick are
+     `status: "skipped"`, `skipReason: "locked"` — expected, not an error.
+4. Stop both with `Ctrl+C` and confirm each logs a clean shutdown.
+
+### RNF-6.2 — killing a worker mid-run recovers within `lockLifetime` + `processEvery` + the lease TTL
+
+1. Same setup as above, but only **one** worker running.
+2. Trigger a run (`POST /api/v1/admin/jobs/poll-prices/run` once the API is
+   also up, or wait for the next scheduled tick) and, while it's in flight,
+   kill the worker process hard: `kill -9 <pid>` (Linux/macOS) — a real
+   `SIGKILL`, not `Ctrl+C`, so no shutdown handler runs at all.
+3. Start a **new** worker process against the same database.
+4. **Expected:** within `lockLifetime` (5 minutes for `poll-prices`) plus
+   `AGENDA_PROCESS_EVERY`, plus `POLL_LOCK_TTL_MS` for the lease
+   independently, the new worker picks the job back up and completes it —
+   confirm a `job_runs` document for that tick eventually reaches
+   `status: "success"` (or a legitimate terminal state), never stuck at
+   `running` forever.
 
 ### E5-18 — an already-satisfied alert produces a real email in Mailpit
 

@@ -164,6 +164,17 @@ export async function deleteAllNotificationsForUser(
 }
 
 /**
+ * Cuenta las notificaciones que pasaron a `failed` desde `since` (spec
+ * maintenance-job: "Failed notification reporting step"). Usa `updatedAt`
+ * como proxy de "entró en failed": no existe un campo `failedAt` dedicado, y
+ * `failed` es un estado terminal, así que la última actualización coincide
+ * con el momento del fallo.
+ */
+export async function countFailedSince(since: Date): Promise<number> {
+  return NotificationModel.countDocuments({ status: 'failed', updatedAt: { $gte: since } }).exec();
+}
+
+/**
  * Snapshot congelado del `payload` de una notificación reclamada por el job
  * de envío (spec send-notifications-job) — mismo shape que
  * `RenderAlertTriggeredPayload` sin `alertId`/`displayTimezone`: esos dos

@@ -84,6 +84,10 @@ export interface CreateRunningInput {
   readonly trigger: JobTrigger;
   readonly startedAt: Date;
   readonly workerId: string;
+  /** Id del documento de Agenda que disparó esta corrida; `undefined` para corridas manuales/de arranque. */
+  readonly agendaJobId?: string;
+  /** Número de intento (spec job-retry-policy): 1 salvo que sea un reintento. Por defecto 1. */
+  readonly attempt?: number;
 }
 
 export interface CloseRunInput {
@@ -101,6 +105,8 @@ export interface CreateSkippedInput {
   readonly skipReason: JobSkipReason;
   readonly at: Date;
   readonly workerId: string;
+  readonly agendaJobId?: string;
+  readonly attempt?: number;
 }
 
 /**
@@ -113,6 +119,17 @@ export interface JobRunsRepo {
   createRunning(input: CreateRunningInput): Promise<Types.ObjectId>;
   closeRun(id: Types.ObjectId, patch: CloseRunInput): Promise<void>;
   createSkipped(input: CreateSkippedInput): Promise<Types.ObjectId>;
+  /**
+   * Adjunta `agendaJobId`/`attempt` a un `JobRun` ya creado (spec
+   * job-run-tracking, tarea 9.2). Usado por los adaptadores de
+   * `src/scheduler/adapters.ts` DESPUÉS de que `job.run()` resuelve: el job
+   * en sí (`src/jobs/pollPrices.ts`/`sendNotifications.ts`) permanece
+   * agnóstico del scheduler y nunca recibe estos campos directamente.
+   */
+  attachAgendaMetadata(
+    id: Types.ObjectId,
+    patch: { agendaJobId?: string; attempt?: number },
+  ): Promise<void>;
   /**
    * Marca toda corrida `running` obsoleta (`startedAt < olderThan`) como
    * `failed`/`STALE`, sellando `finishedAt` con `now`. Ambos instantes se
@@ -132,6 +149,8 @@ export function createJobRunsRepo(): JobRunsRepo {
         status: 'running',
         startedAt: input.startedAt,
         workerId: input.workerId,
+        agendaJobId: input.agendaJobId ?? null,
+        attempt: input.attempt ?? 1,
         stats: { ...EMPTY_JOB_RUN_STATS },
       });
       return doc._id;
@@ -164,8 +183,22 @@ export function createJobRunsRepo(): JobRunsRepo {
         durationMs: 0,
         stats: { ...EMPTY_JOB_RUN_STATS },
         workerId: input.workerId,
+        agendaJobId: input.agendaJobId ?? null,
+        attempt: input.attempt ?? 1,
       });
       return doc._id;
+    },
+
+    async attachAgendaMetadata(id, patch) {
+      await JobRunModel.updateOne(
+        { _id: id },
+        {
+          $set: {
+            ...(patch.agendaJobId !== undefined ? { agendaJobId: patch.agendaJobId } : {}),
+            ...(patch.attempt !== undefined ? { attempt: patch.attempt } : {}),
+          },
+        },
+      ).exec();
     },
 
     async recoverStaleRuns(olderThan, now) {

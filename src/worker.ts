@@ -1,4 +1,4 @@
-import { schedule, validate, type ScheduledTask } from 'node-cron';
+import mongoose from 'mongoose';
 import { assertCoinGeckoApiKey, assertSmtpCredentials, config } from './config/env.js';
 import { logger } from './lib/logger.js';
 import { connectDb, disconnectDb } from './db/connect.js';
@@ -6,7 +6,6 @@ import { ensureCollections } from './db/ensureCollections.js';
 import { verifyReplicaSet } from './lib/verifyReplicaSet.js';
 import { systemClock } from './lib/clock.js';
 import { createWorkerId } from './lib/workerId.js';
-import { createOverlapGuard } from './lib/overlapGuard.js';
 import { createCoinGeckoClient } from './integrations/coingecko/coingecko.client.js';
 import { createSmtpMailer } from './integrations/mailer/smtpMailer.js';
 import { MailError } from './integrations/mailer/mailer.errors.js';
@@ -14,29 +13,34 @@ import { createCoinsRepo } from './modules/coins/coins.service.js';
 import { createSnapshotsRepo } from './modules/snapshots/snapshots.service.js';
 import { createJobRunsRepo } from './modules/job-runs/job-runs.service.js';
 import { createNotificationsJobRepo } from './modules/notifications/notifications.service.js';
-import { createPollPricesJob, JOB_NAME as POLL_JOB_NAME } from './jobs/pollPrices.js';
+import { createPollPricesJob } from './jobs/pollPrices.js';
+import { createNotificationUsersRepo, createSendNotificationsJob } from './jobs/sendNotifications.js';
+import { createMaintenanceJob } from './jobs/maintenance.js';
+import { createAgenda, JOB_NAMES } from './scheduler/agenda.js';
 import {
-  createNotificationUsersRepo,
-  createSendNotificationsJob,
-  JOB_NAME as SEND_JOB_NAME,
-} from './jobs/sendNotifications.js';
-import type { JobTrigger } from './modules/job-runs/job-runs.model.js';
+  defineJobs,
+  registerRecurringJobs,
+  removeObsoleteJobs,
+  type JobHandlers,
+} from './scheduler/definitions.js';
+import {
+  createMaintenanceAdapter,
+  createPollPricesAdapter,
+  createSendNotificationsAdapter,
+} from './scheduler/adapters.js';
+import { registerRetryPolicy } from './scheduler/retryPolicy.js';
+import { registerObservability } from './scheduler/observability.js';
 
 const MINUTE_MS = 60_000;
 
-function delay(ms: number): { promise: Promise<void>; cancel: () => void } {
-  let timer: ReturnType<typeof setTimeout>;
-  const promise = new Promise<void>((resolve) => {
-    timer = setTimeout(resolve, ms);
-  });
-  return { promise, cancel: () => clearTimeout(timer) };
-}
-
 /**
- * Punto de entrada del proceso del worker: sin servidor HTTP. Secuencia de
- * arranque y apagado de RF-1.6/RF-1.7. `src/jobs/pollPrices.ts` no tiene
- * idea de que nada de esto (cron, guarda de solapamiento, recuperación de
- * corridas obsoletas) existe — este es el único módulo que sí sabe.
+ * Punto de entrada del proceso del worker: sin servidor HTTP. Desde la fase
+ * 6, la programación vive en Agenda (colección `agenda_jobs`), no en
+ * `node-cron` ni en un flag en memoria — este es el ÚNICO proceso que
+ * construye Agenda con `role: 'worker'`, define los tres jobs, los registra
+ * como recurrentes y llama a `agenda.start()`. `src/jobs/*.ts` no tiene idea
+ * de que nada de esto existe; ese es el punto de mantenerlos scheduler-
+ * agnósticos (design.md).
  */
 async function main(): Promise<void> {
   assertCoinGeckoApiKey(config, logger);
@@ -45,8 +49,6 @@ async function main(): Promise<void> {
   // Chequeo no fatal de la configuración SMTP al arrancar (spec mailer,
   // tarea 7.3): un fallo acá se loguea en `error` (nunca `fatal` — jamás
   // debe terminar el proceso) y el worker sigue arrancando con normalidad.
-  // Este mismo `mailer` es el que usa después el job `send-notifications`
-  // (fase 9) para el envío real.
   const mailer = createSmtpMailer();
   try {
     await mailer.verify();
@@ -70,6 +72,13 @@ async function main(): Promise<void> {
   await verifyReplicaSet(logger);
   await ensureCollections(logger);
 
+  const db = mongoose.connection.db;
+  if (!db) {
+    logger.fatal('MongoDB connection has no db handle after connectDb(); refusing to start.');
+    process.exit(1);
+    return;
+  }
+
   const workerId = createWorkerId();
   const jobRunsRepo = createJobRunsRepo();
 
@@ -82,28 +91,6 @@ async function main(): Promise<void> {
       { recoveredCount, staleRunThresholdMin: config.STALE_RUN_THRESHOLD_MIN },
       'Recovered JobRun(s) left running by a previous worker process',
     );
-  }
-
-  // Ambas expresiones cron se validan ACA, antes de programar cualquiera de
-  // las dos (tarea 9.9): un `SEND_NOTIFICATIONS_CRON` inválido debe fallar
-  // el arranque exactamente igual que hoy lo hace un `POLL_PRICES_CRON`
-  // inválido, nunca dejar el worker corriendo solo con poll-prices.
-  if (!validate(config.POLL_PRICES_CRON)) {
-    logger.fatal(
-      { cron: config.POLL_PRICES_CRON },
-      'Invalid POLL_PRICES_CRON expression; refusing to start.',
-    );
-    process.exit(1);
-    return;
-  }
-
-  if (!validate(config.SEND_NOTIFICATIONS_CRON)) {
-    logger.fatal(
-      { cron: config.SEND_NOTIFICATIONS_CRON },
-      'Invalid SEND_NOTIFICATIONS_CRON expression; refusing to start.',
-    );
-    process.exit(1);
-    return;
   }
 
   const coingecko = createCoinGeckoClient({
@@ -119,10 +106,9 @@ async function main(): Promise<void> {
   const notificationsJobRepo = createNotificationsJobRepo();
   const notificationUsersRepo = createNotificationUsersRepo();
 
-  // El job `send-notifications` (y su guarda) se arman ANTES que
-  // `poll-prices`, porque `poll-prices` necesita `sendGuard` ya construida
-  // para su hook `triggerSendNotifications` (tarea 6.10, finalmente
-  // conectado acá).
+  const agenda = createAgenda({ db, role: 'worker' });
+  await agenda.ready;
+
   const sendNotificationsJob = createSendNotificationsJob({
     notificationsRepo: notificationsJobRepo,
     usersRepo: notificationUsersRepo,
@@ -133,28 +119,7 @@ async function main(): Promise<void> {
     workerId,
   });
 
-  // Guarda de solapamiento propia de `send-notifications`, independiente de
-  // la de `poll-prices` (spec send-notifications-job): un solapamiento de
-  // un job nunca bloquea ni se confunde con el del otro.
-  const sendGuard = createOverlapGuard<JobTrigger, unknown>({
-    run: (trigger) => sendNotificationsJob.run(trigger),
-    onOverlap: async (trigger) => {
-      logger.warn(
-        { jobName: SEND_JOB_NAME, trigger },
-        'send-notifications: overlap detected; skipping this tick',
-      );
-      const overlapAt = systemClock.now();
-      await jobRunsRepo.createSkipped({
-        jobName: SEND_JOB_NAME,
-        trigger,
-        skipReason: 'overlap',
-        at: overlapAt,
-        workerId,
-      });
-    },
-  });
-
-  const job = createPollPricesJob({
+  const pollPricesJob = createPollPricesJob({
     coinsRepo,
     snapshotsRepo,
     jobRunsRepo,
@@ -162,68 +127,92 @@ async function main(): Promise<void> {
     clock: systemClock,
     logger,
     workerId,
-    // Tarea 6.10, conectada acá: un run de poll-prices que disparó alguna
-    // alerta despacha send-notifications de inmediato, a través de su
-    // propia guarda de solapamiento, fire-and-forget — nunca esperado por
-    // poll-prices (ver el comentario de `triggerSendNotifications` en
-    // `CreatePollPricesJobDeps`).
+    // Tarea 6.10 (etapa 5), ahora sobre Agenda: un run de poll-prices que
+    // disparó alguna alerta encola send-notifications de inmediato como un
+    // job puntual, fire-and-forget — nunca esperado por poll-prices. No
+    // necesita lease (design.md: su reclamo atómico por notificación ya lo
+    // hace seguro de correr junto al recurrente).
     triggerSendNotifications: () => {
-      void sendGuard.runGuarded('manual');
+      void agenda.now(JOB_NAMES.SEND_NOTIFICATIONS, { trigger: 'agenda' });
     },
   });
 
-  // RF-1.5: guarda de solapamiento en memoria. Vive acá, no en el job.
-  const pollGuard = createOverlapGuard<JobTrigger, unknown>({
-    run: (trigger) => job.run(trigger),
-    onOverlap: async (trigger) => {
-      logger.warn(
-        { jobName: POLL_JOB_NAME, trigger },
-        'poll-prices: overlap detected; skipping this tick',
+  const maintenanceJob = createMaintenanceJob({
+    jobRunsRepo,
+    db,
+    clock: systemClock,
+    logger,
+    workerId,
+  });
+
+  const handlers: JobHandlers = {
+    [JOB_NAMES.POLL_PRICES]: createPollPricesAdapter({
+      job: pollPricesJob,
+      jobRunsRepo,
+      clock: systemClock,
+      workerId,
+      leaseTtlMs: config.POLL_LOCK_TTL_MS,
+      logger,
+    }),
+    [JOB_NAMES.SEND_NOTIFICATIONS]: createSendNotificationsAdapter({
+      job: sendNotificationsJob,
+      jobRunsRepo,
+    }),
+    [JOB_NAMES.MAINTENANCE]: createMaintenanceAdapter({
+      job: maintenanceJob,
+      jobRunsRepo,
+    }),
+  };
+
+  defineJobs(agenda, handlers);
+  registerObservability(agenda, { logger });
+  registerRetryPolicy(agenda, {
+    db,
+    clock: systemClock,
+    logger,
+    maxRetries: config.POLL_MAX_JOB_RETRIES,
+  });
+
+  await removeObsoleteJobs(agenda);
+  const recurringJobs = await registerRecurringJobs(agenda, db);
+
+  // Agenda nunca rechaza `every()` por una expresión cron inválida — atrapa
+  // el error de `cron-parser` internamente y deja `nextRunAt: null` (ver el
+  // comentario de `registerRecurringJobs`). Reemplaza al `cron.validate()`
+  // de node-cron: un `nextRunAt` nulo es la señal de que la expresión
+  // configurada es inválida, y el worker debe fallar rápido igual que antes.
+  for (const [jobName, job] of recurringJobs) {
+    if (job.attrs.nextRunAt === null) {
+      logger.fatal(
+        { jobName, cron: job.attrs.repeatInterval },
+        'Invalid cron expression; refusing to start.',
       );
-      const overlapAt = systemClock.now();
-      await jobRunsRepo.createSkipped({
-        jobName: POLL_JOB_NAME,
-        trigger,
-        skipReason: 'overlap',
-        at: overlapAt,
-        workerId,
-      });
-    },
-  });
+      process.exit(1);
+      return;
+    }
+  }
 
-  const activeCoinsCount = (await coinsRepo.findActive()).length;
+  await agenda.start();
 
-  const pollTask: ScheduledTask = schedule(
-    config.POLL_PRICES_CRON,
-    () => {
-      void pollGuard.runGuarded('schedule');
-    },
-    { timezone: 'UTC', name: POLL_JOB_NAME },
-  );
-
-  const sendTask: ScheduledTask = schedule(
-    config.SEND_NOTIFICATIONS_CRON,
-    () => {
-      void sendGuard.runGuarded('schedule');
-    },
-    { timezone: 'UTC', name: SEND_JOB_NAME },
-  );
+  // Reemplaza la invocación directa de RF-1.8: encola un job puntual con
+  // `trigger: "startup"` en lugar de correr el job directamente, así el
+  // lease decide si realmente se ejecuta (spec worker-process: "Startup run
+  // goes through the lease").
+  if (config.POLL_PRICES_RUN_ON_START) {
+    void agenda.now(JOB_NAMES.POLL_PRICES, { trigger: 'startup' });
+  }
 
   logger.info(
     {
       workerId,
       pollPricesCron: config.POLL_PRICES_CRON,
       sendNotificationsCron: config.SEND_NOTIFICATIONS_CRON,
-      activeCoinsCount,
+      maintenanceCron: config.MAINTENANCE_CRON,
     },
     'Worker started',
   );
 
-  if (config.POLL_PRICES_RUN_ON_START) {
-    void pollGuard.runGuarded('startup');
-  }
-
-  // --- RF-1.7: apagado ordenado ---
+  // --- Apagado ordenado (spec worker-process: "Ordered worker shutdown") ---
   let shuttingDown = false;
 
   async function shutdown(signal: string): Promise<void> {
@@ -234,29 +223,14 @@ async function main(): Promise<void> {
 
     logger.info({ signal }, 'Worker shutdown initiated');
 
-    await pollTask.stop();
-    await sendTask.stop();
+    const result = await agenda.drain(config.WORKER_SHUTDOWN_TIMEOUT_MS);
 
-    // Generalizado a las DOS guardas (tarea 9.9): espera las corridas en
-    // curso de `pollGuard` y `sendGuard` en simultáneo contra un único
-    // timeout compartido, en lugar del `guard.currentRun()` único de antes.
-    const runsInProgress = [pollGuard.currentRun(), sendGuard.currentRun()].filter(
-      (run): run is Promise<unknown> => run !== null,
-    );
-
-    if (runsInProgress.length > 0) {
-      const { promise: timeoutPromise, cancel } = delay(config.WORKER_SHUTDOWN_TIMEOUT_MS);
-      await Promise.race([Promise.all(runsInProgress), timeoutPromise]);
-      cancel();
-    }
-
-    if (pollGuard.isRunning() || sendGuard.isRunning()) {
-      logger.error(
-        { timeoutMs: config.WORKER_SHUTDOWN_TIMEOUT_MS },
-        'Worker shutdown timed out waiting for an in-progress run; exiting without touching its JobRun document',
+    if (result.timedOut) {
+      logger.warn(
+        { remaining: result.running, timeoutMs: config.WORKER_SHUTDOWN_TIMEOUT_MS },
+        'Worker shutdown timed out waiting for in-progress jobs; releasing their locks for another worker',
       );
-      process.exit(1);
-      return;
+      await agenda.stop();
     }
 
     await disconnectDb();
