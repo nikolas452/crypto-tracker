@@ -1,0 +1,262 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Lo que hace el backend solo, sin que nadie lo pida",
+    "output": "10-lo-que-hace-el-backend-solo.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "otros",
+      "type": "messagebus",
+      "label": "Disparos puntuales",
+      "sublabel": "Arranque, reintento, admin",
+      "pos": [
+        40,
+        140
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "reloj",
+      "type": "messagebus",
+      "label": "Reloj del worker",
+      "sublabel": "Agenda, cron en UTC",
+      "pos": [
+        40,
+        320
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "coingecko",
+      "type": "external",
+      "label": "CoinGecko",
+      "sublabel": "Precios en USD",
+      "pos": [
+        420,
+        30
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "poll",
+      "type": "backend",
+      "label": "1. poll-prices",
+      "sublabel": "*/10 * * * *",
+      "pos": [
+        420,
+        140
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "send",
+      "type": "backend",
+      "label": "2. send-notifications",
+      "sublabel": "* * * * *",
+      "pos": [
+        420,
+        320
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "maint",
+      "type": "backend",
+      "label": "3. maintenance",
+      "sublabel": "15 3 * * *",
+      "pos": [
+        420,
+        460
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "snaps",
+      "type": "database",
+      "label": "price_snapshots y coins",
+      "sublabel": "Precio nuevo y latest",
+      "pos": [
+        730,
+        60
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "notif",
+      "type": "database",
+      "label": "alerts y notifications",
+      "sublabel": "Alerta y correo pending",
+      "pos": [
+        730,
+        230
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "runs",
+      "type": "database",
+      "label": "job_runs y agenda_jobs",
+      "sublabel": "Corridas y agenda",
+      "pos": [
+        730,
+        460
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "smtp",
+      "type": "external",
+      "label": "SMTP",
+      "sublabel": "Mailpit en local, puerto 8025",
+      "pos": [
+        1020,
+        320
+      ],
+      "size": [
+        200,
+        66
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "otros-poll",
+      "from": "otros",
+      "to": "poll",
+      "label": "ya",
+      "variant": "dashed"
+    },
+    {
+      "id": "reloj-poll",
+      "from": "reloj",
+      "to": "poll",
+      "label": "cada 10 min",
+      "variant": "emphasis"
+    },
+    {
+      "id": "reloj-send",
+      "from": "reloj",
+      "to": "send",
+      "label": "cada minuto",
+      "labelAt": [
+        375,
+        360
+      ]
+    },
+    {
+      "id": "reloj-maint",
+      "from": "reloj",
+      "to": "maint",
+      "label": "03:15 UTC",
+      "fromSide": "bottom"
+    },
+    {
+      "id": "poll-coingecko",
+      "from": "poll",
+      "to": "coingecko",
+      "label": "pide precios",
+      "variant": "emphasis"
+    },
+    {
+      "id": "poll-snaps",
+      "from": "poll",
+      "to": "snaps",
+      "label": "guarda",
+      "variant": "emphasis"
+    },
+    {
+      "id": "poll-notif",
+      "from": "poll",
+      "to": "notif",
+      "label": "si hay disparo"
+    },
+    {
+      "id": "poll-send",
+      "from": "poll",
+      "to": "send",
+      "label": "agenda.now",
+      "variant": "dashed",
+      "labelAt": [
+        520,
+        262
+      ]
+    },
+    {
+      "id": "send-notif",
+      "from": "send",
+      "to": "notif",
+      "label": "reclama"
+    },
+    {
+      "id": "send-smtp",
+      "from": "send",
+      "to": "smtp",
+      "label": "envía el correo",
+      "variant": "emphasis"
+    },
+    {
+      "id": "maint-runs",
+      "from": "maint",
+      "to": "runs",
+      "label": "limpia",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Nadie los pide",
+      "items": [
+        "Corren por reloj en UTC dentro del worker",
+        "El worker no tiene servidor HTTP"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Qué dejan en MongoDB",
+      "items": [
+        "poll-prices: precios y alertas disparadas",
+        "send-notifications: estado de cada correo",
+        "Cada corrida deja una fila en job_runs"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Único aviso al usuario",
+      "items": [
+        "No hay push ni websockets",
+        "Solo llega un correo por SMTP"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,225 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Línea de tiempo de una alerta: del pedido del cliente al correo",
+    "output": "11-linea-de-tiempo-de-una-alerta.html",
+    "viewBox": [
+      1084,
+      695
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "cliente",
+      "type": "frontend",
+      "label": "Cliente",
+      "sublabel": "con token"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "API",
+      "sublabel": "solo responde"
+    },
+    {
+      "id": "mongo",
+      "type": "database",
+      "label": "MongoDB",
+      "sublabel": "punto de encuentro"
+    },
+    {
+      "id": "poll",
+      "type": "backend",
+      "label": "poll-prices",
+      "sublabel": "worker, cada 10 min"
+    },
+    {
+      "id": "send",
+      "type": "backend",
+      "label": "send-notifications",
+      "sublabel": "worker, cada minuto"
+    },
+    {
+      "id": "ext",
+      "type": "external",
+      "label": "Externos",
+      "sublabel": "CoinGecko y SMTP"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 250,
+      "label": "10:00 Pedido por el cliente"
+    },
+    {
+      "from": 268,
+      "to": 390,
+      "label": "10:10 Solo, por reloj: recién ve el cruce de las 10:07"
+    },
+    {
+      "from": 408,
+      "to": 508,
+      "label": "10:10 Solo, por reloj: manda el correo"
+    },
+    {
+      "from": 526,
+      "to": 628,
+      "label": "Después: pedido por el cliente"
+    }
+  ],
+  "messages": [
+    {
+      "from": "cliente",
+      "to": "api",
+      "y": 176,
+      "label": "C1 POST /me/alerts",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "mongo",
+      "y": 204,
+      "label": "C2 guarda la alerta: armed",
+      "variant": "default"
+    },
+    {
+      "from": "api",
+      "to": "cliente",
+      "y": 232,
+      "label": "C3 responde 201 y termina",
+      "variant": "return"
+    },
+    {
+      "from": "poll",
+      "to": "ext",
+      "y": 294,
+      "label": "R1 pide precios a CoinGecko",
+      "variant": "default"
+    },
+    {
+      "from": "poll",
+      "to": "mongo",
+      "y": 322,
+      "label": "R2 guarda snapshot y latest",
+      "variant": "default"
+    },
+    {
+      "from": "poll",
+      "to": "mongo",
+      "y": 350,
+      "label": "R3 evalúa: alerta + outbox",
+      "variant": "emphasis"
+    },
+    {
+      "from": "poll",
+      "to": "send",
+      "y": 378,
+      "label": "R4 agenda.now",
+      "variant": "dashed"
+    },
+    {
+      "from": "send",
+      "to": "mongo",
+      "y": 434,
+      "label": "R5 reclama la pending",
+      "variant": "default"
+    },
+    {
+      "from": "send",
+      "to": "ext",
+      "y": 462,
+      "label": "R6 envía el correo por SMTP",
+      "variant": "emphasis"
+    },
+    {
+      "from": "send",
+      "to": "mongo",
+      "y": 490,
+      "label": "R7 la marca sent",
+      "variant": "default"
+    },
+    {
+      "from": "cliente",
+      "to": "api",
+      "y": 552,
+      "label": "C4 GET /me/notifications",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "mongo",
+      "y": 580,
+      "label": "C5 lee sus notificaciones",
+      "variant": "default"
+    },
+    {
+      "from": "api",
+      "to": "cliente",
+      "y": 608,
+      "label": "C6 responde: sent",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "api",
+      "from": 170,
+      "to": 240,
+      "type": "backend"
+    },
+    {
+      "participant": "mongo",
+      "from": 198,
+      "to": 210,
+      "type": "database"
+    },
+    {
+      "participant": "poll",
+      "from": 288,
+      "to": 384,
+      "type": "backend"
+    },
+    {
+      "participant": "send",
+      "from": 428,
+      "to": 496,
+      "type": "backend"
+    },
+    {
+      "participant": "api",
+      "from": 546,
+      "to": 614,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "C o R en cada mensaje",
+      "items": [
+        "C: pedido por el cliente, con una petición HTTP",
+        "R: solo, por reloj, sin que nadie pida nada"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Por qué no avisa al instante",
+      "items": [
+        "El precio cruzó el umbral a las 10:07",
+        "Nadie lo mira hasta la corrida de las 10:10"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Cómo se entera el cliente",
+      "items": [
+        "No hay push: llega un correo",
+        "O consulta GET /me/notifications"
+      ]
+    }
+  ]
+}

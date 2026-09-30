@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Cómo se identifica y autoriza a un usuario",
+    "output": "08-autenticacion.html",
+    "viewBox": [
+      1000,
+      570
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "cliente",
+      "type": "frontend",
+      "label": "Cliente",
+      "sublabel": "con token de Firebase"
+    },
+    {
+      "id": "auth",
+      "type": "security",
+      "label": "requireAuth",
+      "sublabel": "middleware"
+    },
+    {
+      "id": "firebase",
+      "type": "external",
+      "label": "Firebase Auth",
+      "sublabel": "verifyIdToken"
+    },
+    {
+      "id": "usuarios",
+      "type": "backend",
+      "label": "Usuarios",
+      "sublabel": "users.service"
+    },
+    {
+      "id": "mongo",
+      "type": "database",
+      "label": "MongoDB",
+      "sublabel": "colección users"
+    },
+    {
+      "id": "ruta",
+      "type": "backend",
+      "label": "Ruta",
+      "sublabel": "requireRole y handler"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 250,
+      "label": "Verificar identidad"
+    },
+    {
+      "from": 262,
+      "to": 424,
+      "label": "Resolver usuario"
+    },
+    {
+      "from": 436,
+      "to": 506,
+      "label": "Autorizar"
+    }
+  ],
+  "messages": [
+    {
+      "from": "cliente",
+      "to": "auth",
+      "y": 176,
+      "label": "Bearer token",
+      "variant": "emphasis"
+    },
+    {
+      "from": "auth",
+      "to": "firebase",
+      "y": 206,
+      "label": "verifyIdToken",
+      "variant": "security"
+    },
+    {
+      "from": "firebase",
+      "to": "auth",
+      "y": 236,
+      "label": "uid y email",
+      "variant": "return"
+    },
+    {
+      "from": "auth",
+      "to": "usuarios",
+      "y": 286,
+      "label": "resolveFromIdentity",
+      "variant": "emphasis"
+    },
+    {
+      "from": "usuarios",
+      "to": "mongo",
+      "y": 316,
+      "label": "busca por firebaseUid",
+      "variant": "default"
+    },
+    {
+      "from": "mongo",
+      "to": "usuarios",
+      "y": 346,
+      "label": "usuario o nada",
+      "variant": "return"
+    },
+    {
+      "from": "usuarios",
+      "to": "mongo",
+      "y": 376,
+      "label": "si falta, crea rol user",
+      "variant": "dashed"
+    },
+    {
+      "from": "usuarios",
+      "to": "auth",
+      "y": 406,
+      "label": "usuario listo",
+      "variant": "return"
+    },
+    {
+      "from": "auth",
+      "to": "ruta",
+      "y": 456,
+      "label": "requireRole si es admin",
+      "variant": "security"
+    },
+    {
+      "from": "ruta",
+      "to": "cliente",
+      "y": 486,
+      "label": "respuesta o 403",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "auth",
+      "from": 170,
+      "to": 412,
+      "type": "security"
+    },
+    {
+      "participant": "firebase",
+      "from": 200,
+      "to": 242,
+      "type": "external"
+    },
+    {
+      "participant": "usuarios",
+      "from": 280,
+      "to": 412,
+      "type": "backend"
+    },
+    {
+      "participant": "mongo",
+      "from": 310,
+      "to": 414,
+      "type": "database"
+    },
+    {
+      "participant": "ruta",
+      "from": 450,
+      "to": 492,
+      "type": "backend"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Token revocado",
+      "items": [
+        "Solo DELETE /me y /admin/* usan checkRevoked",
+        "En el resto no se consulta la revocación"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Errores de token",
+      "items": [
+        "Vencido: TOKEN_EXPIRED, 401",
+        "Revocado: TOKEN_REVOKED, 401; deshabilitado: USER_DISABLED, 403",
+        "Firebase caído: FIREBASE_UNAVAILABLE, 502"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Usuarios y roles",
+      "items": [
+        "Se crea al primer request con rol user",
+        "El rol vive solo en MongoDB (user:set-role)"
+      ]
+    }
+  ]
+}

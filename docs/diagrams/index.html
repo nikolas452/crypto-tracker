@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Diagramas del backend</title>
+<style>
+  :root {
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --text: #1b2330;
+    --muted: #5b6678;
+    --border: #d9dee7;
+    --accent: #0a7f9c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10141b;
+      --surface: #18202b;
+      --text: #e7ecf3;
+      --muted: #9aa6b8;
+      --border: #2b3645;
+      --accent: #5cc8e0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 8px; }
+  h2 { font-size: 1.2rem; margin: 32px 0 6px; }
+  .note { margin: 0 0 12px; color: var(--muted); font-size: 0.95rem; }
+  ol { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
+  li { display: grid; gap: 6px; }
+  a.main {
+    display: block;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: inherit;
+    text-decoration: none;
+  }
+  a.main:hover, a.main:focus-visible { border-color: var(--accent); outline: none; }
+  a.guide { justify-self: start; margin-left: 4px; color: var(--accent); font-size: 0.95rem; }
+  .num { color: var(--accent); font-weight: 700; margin-right: 6px; }
+  .title { font-weight: 600; }
+  .desc { display: block; margin-top: 4px; color: var(--muted); font-size: 0.95rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Diagramas del backend</h1>
+  <p class="note">Cada diagrama tiene una guía paso a paso con el detalle que no cabe en el dibujo. Los textos fijos del visor de los diagramas (botones y leyenda) están en inglés; el contenido está en español. BullMQ/Redis está planificado pero no implementado, por eso no aparece dibujado.</p>
+
+  <h2>Empezá acá: cliente vs backend</h2>
+  <p class="note">Para quien no conoce este backend: qué dispara el cliente y qué hace el sistema por su cuenta.</p>
+  <ol>
+    <li>
+      <a class="main" href="diagramas/09-que-puede-pedir-el-cliente.html"><span class="title"><span class="num">9.</span>Qué puede pedir el cliente</span><span class="desc">Qué endpoints puede pedir cada tipo de cliente (sin login, usuario y administrador) y contra qué datos trabaja.</span></a>
+      <a class="guide" href="guias/guia-09-que-puede-pedir-el-cliente.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/10-lo-que-hace-el-backend-solo.html"><span class="title"><span class="num">10.</span>Lo que hace el backend solo</span><span class="desc">Qué corre por reloj en el worker (poll-prices, send-notifications, maintenance) y qué deja listo en MongoDB.</span></a>
+      <a class="guide" href="guias/guia-10-lo-que-hace-el-backend-solo.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/11-linea-de-tiempo-de-una-alerta.html"><span class="title"><span class="num">11.</span>Línea de tiempo de una alerta</span><span class="desc">Un ejemplo con horas: el cliente crea una alerta, se va, el worker la evalúa y llega el correo.</span></a>
+      <a class="guide" href="guias/guia-11-linea-de-tiempo-de-una-alerta.html">Guía paso a paso</a>
+    </li>
+  </ol>
+
+  <h2>Componentes y flujos</h2>
+  <p class="note">De lo general a lo particular.</p>
+  <ol>
+    <li>
+      <a class="main" href="diagramas/01-contexto-del-sistema.html"><span class="title"><span class="num">1.</span>Contexto del sistema</span><span class="desc">Qué procesos y servicios forman el backend y cómo se conectan entre sí.</span></a>
+      <a class="guide" href="guias/guia-01-contexto-del-sistema.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/02-pipeline-de-un-request.html"><span class="title"><span class="num">2.</span>Pipeline de un request</span><span class="desc">Qué pasos atraviesa una petición HTTP antes de llegar a su handler, según sea pública, de usuario o de administrador.</span></a>
+      <a class="guide" href="guias/guia-02-pipeline-de-un-request.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/03-flujo-de-precios.html"><span class="title"><span class="num">3.</span>Flujo de precios</span><span class="desc">Sigue un precio desde CoinGecko, pasando por el worker y MongoDB, hasta la respuesta de la API.</span></a>
+      <a class="guide" href="guias/guia-03-flujo-de-precios.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/04-corrida-poll-prices.html"><span class="title"><span class="num">4.</span>Corrida de poll-prices</span><span class="desc">Qué hace una corrida del job de precios y cómo puede terminar: success, partial, failed o skipped.</span></a>
+      <a class="guide" href="guias/guia-04-corrida-poll-prices.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/05-alerta-a-email.html"><span class="title"><span class="num">5.</span>De la alerta al email</span><span class="desc">Cómo un precio que cruza el umbral termina en un correo, usando una transacción y una cola de envío.</span></a>
+      <a class="guide" href="guias/guia-05-alerta-a-email.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/06-estados-de-alerta.html"><span class="title"><span class="num">6.</span>Estados de una alerta</span><span class="desc">Los estados armed, triggered, completed y disabled, y qué los hace cambiar.</span></a>
+      <a class="guide" href="guias/guia-06-estados-de-alerta.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/07-estados-de-notificacion.html"><span class="title"><span class="num">7.</span>Estados de una notificación</span><span class="desc">El recorrido de un correo pendiente: envío, reintentos con espera, fallo o cancelación.</span></a>
+      <a class="guide" href="guias/guia-07-estados-de-notificacion.html">Guía paso a paso</a>
+    </li>
+    <li>
+      <a class="main" href="diagramas/08-autenticacion.html"><span class="title"><span class="num">8.</span>Autenticación y autorización</span><span class="desc">Cómo se verifica el token de Firebase, cómo se da de alta al usuario y cómo se comprueba su rol.</span></a>
+      <a class="guide" href="guias/guia-08-autenticacion.html">Guía paso a paso</a>
+    </li>
+  </ol>
+</main>
+</body>
+</html>

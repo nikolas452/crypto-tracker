@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "De un precio que cruza el umbral al correo en el buzón",
+    "output": "05-alerta-a-email.html",
+    "viewBox": [
+      1084,
+      699
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "poll",
+      "type": "backend",
+      "label": "poll-prices",
+      "sublabel": "job de precios"
+    },
+    {
+      "id": "alertas",
+      "type": "backend",
+      "label": "Alertas",
+      "sublabel": "evaluación"
+    },
+    {
+      "id": "mongo",
+      "type": "database",
+      "label": "MongoDB",
+      "sublabel": "alerts, notifications"
+    },
+    {
+      "id": "agenda",
+      "type": "messagebus",
+      "label": "Agenda",
+      "sublabel": "planificador"
+    },
+    {
+      "id": "send",
+      "type": "backend",
+      "label": "Envío de correos",
+      "sublabel": "send-notifications"
+    },
+    {
+      "id": "smtp",
+      "type": "external",
+      "label": "SMTP",
+      "sublabel": "Mailpit en local"
+    },
+    {
+      "id": "buzon",
+      "type": "frontend",
+      "label": "Buzón",
+      "sublabel": "del usuario"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 342,
+      "label": "Evaluar y guardar"
+    },
+    {
+      "from": 352,
+      "to": 442,
+      "label": "Despertar el envío"
+    },
+    {
+      "from": 452,
+      "to": 632,
+      "label": "Enviar y registrar"
+    }
+  ],
+  "messages": [
+    {
+      "from": "poll",
+      "to": "alertas",
+      "y": 176,
+      "label": "precios nuevos",
+      "variant": "emphasis"
+    },
+    {
+      "from": "alertas",
+      "to": "mongo",
+      "y": 206,
+      "label": "abre transacción",
+      "variant": "emphasis"
+    },
+    {
+      "from": "alertas",
+      "to": "mongo",
+      "y": 236,
+      "label": "1) alerta: triggered o completed",
+      "variant": "default"
+    },
+    {
+      "from": "alertas",
+      "to": "mongo",
+      "y": 266,
+      "label": "2) verifica el email del usuario",
+      "variant": "default"
+    },
+    {
+      "from": "alertas",
+      "to": "mongo",
+      "y": 296,
+      "label": "3) notificación pending",
+      "variant": "default"
+    },
+    {
+      "from": "mongo",
+      "to": "alertas",
+      "y": 326,
+      "label": "commit o rollback",
+      "variant": "return"
+    },
+    {
+      "from": "poll",
+      "to": "agenda",
+      "y": 366,
+      "label": "agenda.now",
+      "variant": "emphasis"
+    },
+    {
+      "from": "agenda",
+      "to": "send",
+      "y": 396,
+      "label": "ejecuta ya",
+      "variant": "emphasis"
+    },
+    {
+      "from": "agenda",
+      "to": "send",
+      "y": 426,
+      "label": "o cron cada minuto",
+      "variant": "dashed"
+    },
+    {
+      "from": "send",
+      "to": "mongo",
+      "y": 466,
+      "label": "reclama pending",
+      "variant": "default"
+    },
+    {
+      "from": "mongo",
+      "to": "send",
+      "y": 496,
+      "label": "notificación",
+      "variant": "return"
+    },
+    {
+      "from": "send",
+      "to": "smtp",
+      "y": 526,
+      "label": "envía alert-triggered",
+      "variant": "emphasis"
+    },
+    {
+      "from": "smtp",
+      "to": "buzon",
+      "y": 556,
+      "label": "entrega el correo",
+      "variant": "emphasis"
+    },
+    {
+      "from": "smtp",
+      "to": "send",
+      "y": 586,
+      "label": "aceptado o rechazado",
+      "variant": "return"
+    },
+    {
+      "from": "send",
+      "to": "mongo",
+      "y": 616,
+      "label": "sent, reintento o failed",
+      "variant": "default"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "alertas",
+      "from": 170,
+      "to": 332,
+      "type": "backend"
+    },
+    {
+      "participant": "mongo",
+      "from": 200,
+      "to": 332,
+      "type": "database"
+    },
+    {
+      "participant": "agenda",
+      "from": 360,
+      "to": 436,
+      "type": "messagebus"
+    },
+    {
+      "participant": "send",
+      "from": 390,
+      "to": 622,
+      "type": "backend"
+    },
+    {
+      "participant": "mongo",
+      "from": 460,
+      "to": 512,
+      "type": "database"
+    },
+    {
+      "participant": "smtp",
+      "from": 520,
+      "to": 592,
+      "type": "external"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Transacción atómica",
+      "items": [
+        "Alerta y outbox en una transacción",
+        "Sin email verificado: se revierte"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Cola de correos (outbox)",
+      "items": [
+        "La notificación nace en pending",
+        "Clave única: sin duplicados"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Al instante o cada minuto",
+      "items": [
+        "Con disparos: envío inmediato",
+        "Sin disparos: cron cada minuto"
+      ]
+    }
+  ]
+}

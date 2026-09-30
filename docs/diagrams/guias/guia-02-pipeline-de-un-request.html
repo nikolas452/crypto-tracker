@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Guía 02: Pipeline de un request</title>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--fg:#1c2330;--muted:#5a6578;--line:#dde2ea;--accent:#0b6bcb;--cli-bg:#e1f1ff;--cli-fg:#0a4d94;--bak-bg:#dcf5e6;--bak-fg:#0b6a3a;--amb-bg:#fff0d0;--amb-fg:#8a5300;--code-bg:#eef1f6;--callout:#eef6ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#171e28;--fg:#e6eaf1;--muted:#9aa6b8;--line:#2a3442;--accent:#6db3ff;--cli-bg:#12314f;--cli-fg:#9fd0ff;--bak-bg:#123a25;--bak-fg:#8fe0b3;--amb-bg:#40300d;--amb-fg:#ffd58a;--code-bg:#222b38;--callout:#14263a}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:56rem;margin:0 auto;padding:16px}
+a{color:var(--accent)}
+h1{font-size:1.6rem;line-height:1.25;margin:.4rem 0 .6rem}
+h2{font-size:1.25rem;margin:2rem 0 .75rem;padding-top:.5rem;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:0;line-height:1.3}
+code{background:var(--code-bg);padding:.1em .35em;border-radius:4px;font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+.crumbs{font-size:.9rem;color:var(--muted)}
+.lead{font-size:1.05rem}
+.callout{background:var(--callout);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:.75rem 1rem;margin:1rem 0}
+.frame{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.frame iframe{display:block;width:100%;height:88vh;min-height:520px;max-height:940px;border:0}
+.frame-note{font-size:.9rem;color:var(--muted);margin:.5rem 0 0}
+dl.glossary{display:grid;gap:.6rem;margin:0}
+dl.glossary>div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem}
+dl.glossary dt{font-weight:700}
+dl.glossary dd{margin:.15rem 0 0;color:var(--muted)}
+ol.steps{list-style:none;margin:0;padding:0;display:grid;gap:.9rem}
+.step{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem}
+.step-head{display:flex;gap:.7rem;align-items:center}
+.num{flex:none;width:2rem;height:2rem;border-radius:50%;background:var(--accent);color:var(--bg);display:inline-grid;place-items:center;font-weight:700}
+.tag{display:inline-block;margin:.5rem 0 .2rem;padding:.15rem .6rem;border-radius:999px;font-size:.85rem}
+.tag span{opacity:.85}
+.tag-cli{background:var(--cli-bg);color:var(--cli-fg)}
+.tag-bak{background:var(--bak-bg);color:var(--bak-fg)}
+.tag-amb{background:var(--amb-bg);color:var(--amb-fg)}
+.step p{margin:.35rem 0}
+dl.meta{margin:.5rem 0 0;display:grid;gap:.35rem;font-size:.92rem}
+dl.meta>div{display:grid;grid-template-columns:6.5rem 1fr;gap:.5rem}
+dl.meta dt{color:var(--muted);font-weight:600}
+dl.meta dd{margin:0;min-width:0}
+.env li{margin:.35rem 0}
+nav.pager{display:flex;justify-content:space-between;gap:1rem;margin:2rem 0 1rem;padding-top:1rem;border-top:1px solid var(--line);flex-wrap:wrap}
+@media (max-width:520px){dl.meta>div{grid-template-columns:1fr;gap:.1rem}h1{font-size:1.35rem}}
+</style>
+</head>
+<body>
+<main>
+<p class="crumbs"><a href="../index.html">&larr; Índice de diagramas</a> · Guía 02 de 11</p>
+<h1>Qué atraviesa un request antes de llegar al handler</h1>
+<p class="lead"><strong>Qué responde este diagrama:</strong> por qué pasos fijos viaja cada pedido HTTP dentro de la API, en qué orden, y cómo termina cuando algo sale mal.</p>
+<div class="callout"><strong>Idea clave:</strong> es la cola del mostrador. Cada pedido pasa por los mismos controles, en el mismo orden, y cualquier error termina en un único manejador que lo convierte en un JSON uniforme. El orden real está fijado en <code>createApp()</code>.</div>
+
+<h2 id="diagrama">El diagrama</h2>
+<div class="frame">
+<iframe src="../diagramas/02-pipeline-de-un-request.html" title="Pipeline de un request" loading="lazy"></iframe>
+</div>
+<p class="frame-note"><a href="../diagramas/02-pipeline-de-un-request.html" target="_blank" rel="noopener">Abrir el diagrama a pantalla completa</a>. Los textos fijos del visor (botones y leyenda) están en inglés; el contenido del diagrama está en español.</p>
+
+<h2 id="glosario">Mini glosario</h2>
+<dl class="glossary">
+<div><dt>Middleware</dt><dd>Un paso por el que pasa cada pedido antes de llegar a su handler (identificar, limitar, autenticar). Se ejecutan en un orden fijo definido en <code>src/app.ts</code>.</dd></div>
+<div><dt>Handler</dt><dd>La función que resuelve un endpoint concreto una vez que pasó todos los middlewares.</dd></div>
+<div><dt>Límite de tasa</dt><dd>Un tope de pedidos por ventana de tiempo. Si se supera, la API responde <code>429 RATE_LIMITED</code>.</dd></div>
+<div><dt>Token de Firebase (JWT)</dt><dd>La credencial que el cliente obtiene de Firebase Auth y envía en <code>Authorization: Bearer &lt;token&gt;</code>. La API lo verifica con Firebase.</dd></div>
+<div><dt>Cliente</dt><dd>Cualquier programa que llame a la API: una web, una app o Postman. En este proyecto todavía no hay front end.</dd></div>
+</dl>
+
+<h2 id="pasos">Paso a paso</h2>
+<p>Cada paso indica quién lo dispara: el <strong>Cliente</strong> (alguien hace un pedido HTTP), el <strong>Backend solo</strong> (el worker actúa por reloj, sin que nadie pida nada) o <strong>Ambos</strong>. Los nombres de rutas, jobs, estados, colecciones y variables son los reales del código.</p>
+<ol class="steps">
+<li class="step" id="paso-1">
+  <div class="step-head"><span class="num" aria-hidden="true">1</span><h3>Llega el request</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p>Express recibe el pedido. Antes de todo se configura <code>trust proxy</code> con <code>TRUST_PROXY</code> (0 en desarrollo, 1 en producción) para que el límite por IP identifique al cliente real y no al proxy.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Ninguna.</dd></div>
+    <div><dt>Código</dt><dd><code>src/app.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-2">
+  <div class="step-head"><span class="num" aria-hidden="true">2</span><h3>Identificación y log</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p><code>requestId</code> toma el encabezado <code>X-Request-Id</code> del cliente (si es válido, hasta 128 caracteres) o genera un UUID, y lo devuelve en la respuesta. Después el log de requests (pino-http) registra el pedido con ese id.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Ninguna.</dd></div>
+    <div><dt>Código</dt><dd><code>src/middlewares/requestId.ts</code> <code>src/middlewares/requestLogger.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-3">
+  <div class="step-head"><span class="num" aria-hidden="true">3</span><h3>Cabeceras de seguridad y cuerpo JSON</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p><code>helmet</code> agrega cabeceras de seguridad y <code>express.json</code> lee el cuerpo con un tope de 100 KB. Un JSON mal formado responde <code>400 VALIDATION_ERROR</code> y uno demasiado grande, <code>413</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Ninguna.</dd></div>
+    <div><dt>Código</dt><dd><code>src/app.ts</code> <code>src/middlewares/errorHandler.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-4">
+  <div class="step-head"><span class="num" aria-hidden="true">4</span><h3>/health y /health/ready, antes del límite</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p>Las rutas de salud se montan antes del limitador, así que nunca cuentan contra el tope. <code>/health</code> no toca la base; <code>/health/ready</code> comprueba MongoDB y responde <code>503</code> si no está disponible.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd><code>/health/ready</code> hace un chequeo de conectividad a MongoDB.</dd></div>
+    <div><dt>Código</dt><dd><code>src/routes/health.routes.ts</code> <code>src/lib/health.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-5">
+  <div class="step-head"><span class="num" aria-hidden="true">5</span><h3>Límite por IP en /api</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p>Todo lo que empieza con <code>/api</code> pasa por un limitador de 300 pedidos por 15 minutos por IP (<code>RATE_LIMIT_MAX</code>, <code>RATE_LIMIT_WINDOW_MIN</code>). Si se supera: <code>429 RATE_LIMITED</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Ninguna (el contador vive en memoria del proceso de la API).</dd></div>
+    <div><dt>Código</dt><dd><code>src/middlewares/rateLimiter.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-6">
+  <div class="step-head"><span class="num" aria-hidden="true">6</span><h3>Ruteo por prefijo: pública, de usuario o de administrador</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p><code>/api/v1/coins</code> lleva <code>Cache-Control: public, max-age=60</code> y <code>/api/v1/status</code> lleva <code>no-store</code>; ambas son públicas. <code>/me</code>, <code>/me/watchlist</code>, <code>/me/alerts</code> y <code>/me/notifications</code> exigen <code>requireAuth</code> y un límite por usuario de 120 pedidos por minuto (<code>USER_RATE_LIMIT_PER_MIN</code>); las tres últimas llevan <code>Cache-Control: private, no-cache</code>. <code>/api/v1/admin</code> lleva <code>no-store</code>, <code>requireAuth</code> con <code>checkRevoked: true</code>, el mismo límite por usuario y por último <code>requireRole('admin')</code>: sin rol admin, <code>403 FORBIDDEN</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Las rutas autenticadas leen/escriben <code>users</code> (perfil del token).</dd></div>
+    <div><dt>Código</dt><dd><code>src/app.ts</code> <code>src/middlewares/requireAuth.ts</code> <code>src/middlewares/requireRole.ts</code> <code>src/middlewares/cacheControl.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-7">
+  <div class="step-head"><span class="num" aria-hidden="true">7</span><h3>El handler resuelve el pedido</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p>Cada ruta valida entrada con zod (por ejemplo, un parámetro de query desconocido responde <code>400 VALIDATION_ERROR</code>), llama al servicio del módulo y responde. La respuesta sale directo al cliente.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Depende del módulo (ver guía 09).</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/*/*.routes.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-8">
+  <div class="step-head"><span class="num" aria-hidden="true">8</span><h3>Sin coincidencia: 404. Con error: errorHandler</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p>Si ninguna ruta coincide, <code>notFoundHandler</code> genera <code>404 NOT_FOUND</code>. Cualquier error (de validación, de autenticación o inesperado) termina en <code>errorHandler</code>, que responde siempre con la misma forma: <code>{ "error": { "code", "message", "requestId", "details"? } }</code>. Un error no previsto responde <code>500 INTERNAL_ERROR</code> y en desarrollo agrega el stack.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Ninguna.</dd></div>
+    <div><dt>Código</dt><dd><code>src/middlewares/notFoundHandler.ts</code> <code>src/middlewares/errorHandler.ts</code> <code>src/lib/errors.ts</code></dd></div>
+  </dl>
+</li>
+</ol>
+
+<h2 id="entorno">Cómo verlo en tu entorno</h2>
+<ul class="env">
+<li>Con la API levantada (<code>npm run dev</code>), prueba en Postman la carpeta <em>Health</em>: <em>Liveness with X-Request-Id</em> (mira que la respuesta devuelva el mismo <code>X-Request-Id</code>), <em>Unknown route -> 404</em> y <em>Malformed JSON body -> 400</em>.</li>
+<li>Prueba la autenticación por prefijo: <em>Me</em> → <em>Get my profile - no token -> 401</em> y <em>Admin - Job Runs</em> → <em>List job runs - non-admin token -> 403</em>.</li>
+<li>Mira el log de la API: cada pedido aparece con su <code>requestId</code>, el mismo que viaja en la respuesta y en el error.</li>
+<li>Importa <code>crypto-tracker.postman_collection.json</code> en Postman (variable <code>baseUrl</code>) o abre <code>requests.http</code> con la extensión REST Client de VS Code; ambos traen los mismos pedidos.</li>
+</ul>
+
+<nav class="pager">
+    <a href="guia-01-contexto-del-sistema.html">&larr; Guía 01</a>
+    <a href="../index.html">Índice</a>
+    <a href="guia-03-flujo-de-precios.html">Guía 03 &rarr;</a>
+</nav>
+</main>
+</body>
+</html>

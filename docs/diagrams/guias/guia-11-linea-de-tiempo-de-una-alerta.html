@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Guía 11: Línea de tiempo de una alerta</title>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--fg:#1c2330;--muted:#5a6578;--line:#dde2ea;--accent:#0b6bcb;--cli-bg:#e1f1ff;--cli-fg:#0a4d94;--bak-bg:#dcf5e6;--bak-fg:#0b6a3a;--amb-bg:#fff0d0;--amb-fg:#8a5300;--code-bg:#eef1f6;--callout:#eef6ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#171e28;--fg:#e6eaf1;--muted:#9aa6b8;--line:#2a3442;--accent:#6db3ff;--cli-bg:#12314f;--cli-fg:#9fd0ff;--bak-bg:#123a25;--bak-fg:#8fe0b3;--amb-bg:#40300d;--amb-fg:#ffd58a;--code-bg:#222b38;--callout:#14263a}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:56rem;margin:0 auto;padding:16px}
+a{color:var(--accent)}
+h1{font-size:1.6rem;line-height:1.25;margin:.4rem 0 .6rem}
+h2{font-size:1.25rem;margin:2rem 0 .75rem;padding-top:.5rem;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:0;line-height:1.3}
+code{background:var(--code-bg);padding:.1em .35em;border-radius:4px;font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+.crumbs{font-size:.9rem;color:var(--muted)}
+.lead{font-size:1.05rem}
+.callout{background:var(--callout);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:.75rem 1rem;margin:1rem 0}
+.frame{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.frame iframe{display:block;width:100%;height:88vh;min-height:520px;max-height:940px;border:0}
+.frame-note{font-size:.9rem;color:var(--muted);margin:.5rem 0 0}
+dl.glossary{display:grid;gap:.6rem;margin:0}
+dl.glossary>div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem}
+dl.glossary dt{font-weight:700}
+dl.glossary dd{margin:.15rem 0 0;color:var(--muted)}
+ol.steps{list-style:none;margin:0;padding:0;display:grid;gap:.9rem}
+.step{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem}
+.step-head{display:flex;gap:.7rem;align-items:center}
+.num{flex:none;width:2rem;height:2rem;border-radius:50%;background:var(--accent);color:var(--bg);display:inline-grid;place-items:center;font-weight:700}
+.tag{display:inline-block;margin:.5rem 0 .2rem;padding:.15rem .6rem;border-radius:999px;font-size:.85rem}
+.tag span{opacity:.85}
+.tag-cli{background:var(--cli-bg);color:var(--cli-fg)}
+.tag-bak{background:var(--bak-bg);color:var(--bak-fg)}
+.tag-amb{background:var(--amb-bg);color:var(--amb-fg)}
+.step p{margin:.35rem 0}
+dl.meta{margin:.5rem 0 0;display:grid;gap:.35rem;font-size:.92rem}
+dl.meta>div{display:grid;grid-template-columns:6.5rem 1fr;gap:.5rem}
+dl.meta dt{color:var(--muted);font-weight:600}
+dl.meta dd{margin:0;min-width:0}
+.env li{margin:.35rem 0}
+nav.pager{display:flex;justify-content:space-between;gap:1rem;margin:2rem 0 1rem;padding-top:1rem;border-top:1px solid var(--line);flex-wrap:wrap}
+@media (max-width:520px){dl.meta>div{grid-template-columns:1fr;gap:.1rem}h1{font-size:1.35rem}}
+</style>
+</head>
+<body>
+<main>
+<p class="crumbs"><a href="../index.html">&larr; Índice de diagramas</a> · Guía 11 de 11</p>
+<h1>Línea de tiempo de una alerta: del pedido del cliente al correo</h1>
+<p class="lead"><strong>Qué responde este diagrama:</strong> qué pasa, en orden y con horas de ejemplo, desde que el cliente crea una alerta hasta que llega el correo, y qué mensajes los pide el cliente y cuáles ocurren solos por reloj.</p>
+<div class="callout"><strong>Cómo leer el diagrama:</strong> cada mensaje lleva una letra. <strong>C</strong> es "pedido por el cliente" (hay una petición HTTP) y <strong>R</strong> es "solo, por reloj" (el worker actúa sin que nadie pida nada). Las horas (10:00, 10:07, 10:10) son un ejemplo ilustrativo: en la realidad <code>poll-prices</code> corre cada 10 minutos y Agenda puede demorar hasta unos 10 segundos.</div>
+
+<h2 id="diagrama">El diagrama</h2>
+<div class="frame">
+<iframe src="../diagramas/11-linea-de-tiempo-de-una-alerta.html" title="Línea de tiempo de una alerta" loading="lazy"></iframe>
+</div>
+<p class="frame-note"><a href="../diagramas/11-linea-de-tiempo-de-una-alerta.html" target="_blank" rel="noopener">Abrir el diagrama a pantalla completa</a>. Los textos fijos del visor (botones y leyenda) están en inglés; el contenido del diagrama está en español.</p>
+
+<h2 id="glosario">Mini glosario</h2>
+<dl class="glossary">
+<div><dt>Cliente</dt><dd>Cualquier programa que llame a la API: una web, una app o Postman. En este proyecto todavía no hay front end.</dd></div>
+<div><dt>API</dt><dd>El programa que atiende pedidos HTTP (<code>npm run dev</code>, <code>src/server.ts</code>). Es el mostrador: recibe pedidos, responde y no cocina nada por su cuenta.</dd></div>
+<div><dt>Worker</dt><dd>El programa que trabaja por reloj (<code>npm run dev:worker</code>, <code>src/worker.ts</code>). Es la cocina: nadie le pide nada, prepara las cosas solo. No tiene servidor HTTP.</dd></div>
+<div><dt>MongoDB</dt><dd>La base de datos. Es el único lugar donde se encuentran API y worker: el worker deja cosas ahí y la API las lee.</dd></div>
+<div><dt>Alerta</dt><dd>Una regla del usuario, por ejemplo "avisar si bitcoin baja de cierto precio". Vive en la colección <code>alerts</code> y tiene un estado (<code>armed</code>, <code>triggered</code>, <code>completed</code>, <code>disabled</code>).</dd></div>
+<div><dt>Transacción</dt><dd>Un grupo de escrituras en MongoDB que se guardan todas o ninguna. Por eso MongoDB debe correr como replica set.</dd></div>
+<div><dt>Outbox (cola de correos)</dt><dd>La colección <code>notifications</code>: una fila por correo pendiente. Se escribe junto con la alerta y otro proceso la vacía después.</dd></div>
+<div><dt>dedupeKey</dt><dd>La clave única <code>alertId:triggerCount</code> de cada notificación. Impide crear dos correos para el mismo disparo.</dd></div>
+<div><dt>SMTP y Mailpit</dt><dd>SMTP es el protocolo de envío de correo. En local se usa Mailpit, un buzón de mentira: recibe por el puerto 1025 y se ve en <code>http://localhost:8025</code>.</dd></div>
+</dl>
+
+<h2 id="pasos">Paso a paso</h2>
+<p>Cada paso indica quién lo dispara: el <strong>Cliente</strong> (alguien hace un pedido HTTP), el <strong>Backend solo</strong> (el worker actúa por reloj, sin que nadie pida nada) o <strong>Ambos</strong>. Los nombres de rutas, jobs, estados, colecciones y variables son los reales del código.</p>
+<ol class="steps">
+<li class="step" id="paso-1">
+  <div class="step-head"><span class="num" aria-hidden="true">1</span><h3>10:00 · C1 a C3: el cliente crea la alerta y la petición termina</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p>El cliente envía <code>POST /api/v1/me/alerts</code> con token. La API comprueba email verificado, moneda activa y tope de alertas, guarda la alerta como <code>armed</code> (por defecto <code>mode: recurring</code>, <code>cooldownMinutes: 60</code>, <code>rearmPct: 1</code>) y responde <code>201</code>. <strong>No evalúa nada</strong> y no toca a CoinGecko: ahí termina el trabajo de la API. El cliente puede irse.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe una fila en <code>alerts</code> con <code>status: "armed"</code>. Lee <code>coins</code> (para validar y calcular <code>conditionCurrentlyMet</code>).</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/alerts/alerts.service.ts</code> <code>src/modules/alerts/alerts.routes.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-2">
+  <div class="step-head"><span class="num" aria-hidden="true">2</span><h3>10:07 · el precio cruza el umbral y nadie lo nota</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>El precio cambia en CoinGecko, pero en este sistema no corre nada que lo esté mirando: el worker solo mira cada 10 minutos y la API no evalúa alertas. Por eso el diagrama no dibuja mensajes en ese tramo: es una espera, no una acción.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Nada cambia todavía en MongoDB.</dd></div>
+    <div><dt>Código</dt><dd><code>src/scheduler/definitions.ts</code> <code>src/config/constants.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-3">
+  <div class="step-head"><span class="num" aria-hidden="true">3</span><h3>10:10 · R1: poll-prices pide precios a CoinGecko</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Llega la hora de <code>*/10 * * * *</code>. Agenda dispara <code>poll-prices</code>, que toma el lease, abre su fila en <code>job_runs</code>, lee las monedas activas y pide todos los precios a CoinGecko.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Lee <code>coins</code>; escribe <code>job_locks</code> y <code>job_runs</code> (<code>running</code>).</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/pollPrices.ts</code> <code>src/scheduler/adapters.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-4">
+  <div class="step-head"><span class="num" aria-hidden="true">4</span><h3>10:10 · R2: guarda snapshot y latest</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Por cada moneda cuyo <code>sourceUpdatedAt</code> cambió, inserta un snapshot y actualiza <code>coins.latest</code>. Las monedas sin dato nuevo se omiten y, importante, <strong>no se evalúan sus alertas</strong> en esta corrida.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>price_snapshots</code> y <code>coins.latest</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/pollPrices.ts</code> <code>src/modules/coins/coins.service.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-5">
+  <div class="step-head"><span class="num" aria-hidden="true">5</span><h3>10:10 · R3: evalúa las alertas y prepara el correo en una transacción</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Recorre las alertas <code>armed</code> y <code>triggered</code> de las monedas con precio nuevo. Para cada una, <code>decide()</code> devuelve <code>TRIGGER</code>, <code>REARM</code>, <code>COOLDOWN</code> o <code>NOOP</code>. Con <code>TRIGGER</code> abre una transacción de MongoDB que hace tres cosas: actualiza la alerta (<code>armed</code> pasa a <code>triggered</code>, o a <code>completed</code> si es <code>once</code>) con control de versión, verifica que el usuario exista y tenga email verificado, e inserta una notificación <code>pending</code> con <code>dedupeKey</code> <code>alertId:triggerCount</code>. Si algo falla (conflicto de versión, usuario sin email verificado, clave duplicada) se revierte todo y la alerta queda como estaba.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Lee <code>alerts</code> y <code>users</code>. Escribe <code>alerts</code> y <code>notifications</code> (<code>pending</code>) en una sola transacción.</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/alertEvaluation.ts</code> <code>src/modules/alerts/alerts.decide.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-6">
+  <div class="step-head"><span class="num" aria-hidden="true">6</span><h3>10:10 · R4: agenda.now despierta a send-notifications</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Si la corrida no terminó en <code>failed</code> y disparó al menos una alerta, <code>poll-prices</code> encola <code>send-notifications</code> con <code>agenda.now</code> (fire-and-forget: no espera su resultado). Si no disparó ninguna, el envío queda para el cron de cada minuto. Agenda lo toma en su próximo ciclo de revisión (hasta unos 10 s).</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>agenda_jobs</code> (un documento puntual con <code>trigger: "agenda"</code>).</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/pollPrices.ts</code> <code>src/worker.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-7">
+  <div class="step-head"><span class="num" aria-hidden="true">7</span><h3>10:10 · R5 y R6: reclama la pending y envía el correo</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p><code>send-notifications</code> reclama de forma atómica la notificación <code>pending</code> (pasa a <code>sending</code>), comprueba que el usuario exista, renderiza la plantilla <code>alert-triggered</code> y la envía por SMTP (en local, a Mailpit). El correo llega al buzón del usuario sin que ningún cliente lo haya pedido.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Lee y escribe <code>notifications</code> (<code>pending</code> → <code>sending</code>); lee <code>users</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/sendNotifications.ts</code> <code>src/modules/notifications/templates/alert-triggered.ts</code> <code>src/integrations/mailer/smtpMailer.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-8">
+  <div class="step-head"><span class="num" aria-hidden="true">8</span><h3>10:10 · R7: marca la notificación como sent</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Si el SMTP acepta el mensaje, la fila pasa a <code>sent</code> con <code>sentAt</code> y <code>providerMessageId</code>. Si falla de forma transitoria vuelve a <code>pending</code> con espera (1, 5, 15, 60 min); si el rechazo es permanente (<code>SMTP_REJECTED</code>) o se agotan los 5 intentos, queda <code>failed</code>. Cierra su fila en <code>job_runs</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>notifications</code> (<code>sent</code>, <code>failed</code> o de vuelta a <code>pending</code>) y <code>job_runs</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/sendNotifications.ts</code> <code>src/jobs/notifyBackoff.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-9">
+  <div class="step-head"><span class="num" aria-hidden="true">9</span><h3>Después · C4 a C6: el cliente consulta sus notificaciones</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p>No hay push. Si el cliente quiere saber qué pasó, pide <code>GET /api/v1/me/notifications</code> (opcionalmente <code>?status=sent</code>). La API lee las filas del usuario ordenadas de la más nueva a la más vieja y las devuelve con <code>status</code>, <code>to</code> (enmascarado), <code>payload</code>, <code>attempts</code>, <code>sentAt</code> y <code>lastError</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Solo lee <code>notifications</code> filtrando por el <code>userId</code> del token.</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/notifications/notifications.service.ts</code> <code>src/modules/notifications/notifications.routes.ts</code></dd></div>
+  </dl>
+</li>
+</ol>
+
+<h2 id="entorno">Cómo verlo en tu entorno</h2>
+<ul class="env">
+<li>Levanta lo básico: <code>docker compose up</code> (MongoDB como replica set y Mailpit), luego <code>npm run dev</code> (la API queda en <code>http://localhost:3000</code>) y, en otra terminal, <code>npm run dev:worker</code>.</li>
+<li>Importa <code>crypto-tracker.postman_collection.json</code> en Postman (variable <code>baseUrl</code>) o abre <code>requests.http</code> con la extensión REST Client de VS Code; ambos traen los mismos pedidos.</li>
+<li>Paso a paso con Postman: (1) carpeta <em>Auth (Firebase)</em> → <em>Sign in (get ID token)</em>; (2) <em>My Alerts</em> → <em>Create a PRICE_BELOW alert</em> (el email de la cuenta debe estar verificado); (3) espera a la próxima corrida o usa <em>Admin - Jobs</em> → <em>Trigger a job now</em> con <code>poll-prices</code> (solo encola; la ejecuta el worker); (4) mira los logs del worker y Mailpit; (5) <em>My Notifications</em> → <em>List my notification history</em>.</li>
+<li>Para que la alerta dispare, su condición debe cumplirse en una corrida en la que la moneda tenga un precio nuevo de CoinGecko. Si el precio de la fuente no cambió desde la corrida anterior, esa moneda se omite y su alerta no se evalúa.</li>
+<li>Mailpit: abre <code>http://localhost:8025</code> para ver los correos que envía el worker (recibe por SMTP en el puerto 1025).</li>
+<li>Logs del worker: en la terminal de <code>npm run dev:worker</code> aparecen líneas como <code>Worker started</code>, <code>poll-prices run started</code> / <code>poll-prices run finished</code> y <code>send-notifications: sent</code>.</li>
+</ul>
+
+<nav class="pager">
+    <a href="guia-10-lo-que-hace-el-backend-solo.html">&larr; Guía 10</a>
+    <a href="../index.html">Índice</a>
+    <span></span>
+</nav>
+</main>
+</body>
+</html>

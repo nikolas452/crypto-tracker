@@ -1,0 +1,218 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Contexto del sistema: procesos y servicios del backend",
+    "output": "01-contexto-del-sistema.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "cliente",
+      "type": "frontend",
+      "label": "Cliente (frontend)",
+      "sublabel": "Navegador o app",
+      "pos": [
+        40,
+        60
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "admin",
+      "type": "frontend",
+      "label": "Administrador",
+      "sublabel": "Usuario con rol admin",
+      "pos": [
+        40,
+        230
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "API (server.ts)",
+      "sublabel": "npm run dev, Express",
+      "pos": [
+        330,
+        60
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "firebase",
+      "type": "security",
+      "label": "Firebase Auth",
+      "sublabel": "Verifica tokens",
+      "pos": [
+        620,
+        60
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "mongo",
+      "type": "database",
+      "label": "MongoDB",
+      "sublabel": "Replica set + agenda_jobs",
+      "pos": [
+        330,
+        230
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "smtp",
+      "type": "external",
+      "label": "SMTP",
+      "sublabel": "Mailpit en local",
+      "pos": [
+        620,
+        230
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "scripts",
+      "type": "backend",
+      "label": "Scripts CLI",
+      "sublabel": "seed:coins, backfill:history",
+      "pos": [
+        40,
+        400
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Worker (worker.ts)",
+      "sublabel": "npm run dev:worker, Agenda",
+      "pos": [
+        330,
+        400
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "coingecko",
+      "type": "external",
+      "label": "CoinGecko",
+      "sublabel": "API de precios",
+      "pos": [
+        620,
+        400
+      ],
+      "size": [
+        180,
+        66
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "cliente-api",
+      "from": "cliente",
+      "to": "api",
+      "label": "HTTP /api/v1",
+      "variant": "emphasis"
+    },
+    {
+      "id": "admin-api",
+      "from": "admin",
+      "to": "api",
+      "label": "HTTP /api/v1/admin"
+    },
+    {
+      "id": "api-firebase",
+      "from": "api",
+      "to": "firebase",
+      "label": "verifica token"
+    },
+    {
+      "id": "api-mongo",
+      "from": "api",
+      "to": "mongo",
+      "label": "lee y escribe",
+      "labelDy": 30
+    },
+    {
+      "id": "worker-mongo",
+      "from": "worker",
+      "to": "mongo",
+      "label": "guarda precios y jobs"
+    },
+    {
+      "id": "worker-coingecko",
+      "from": "worker",
+      "to": "coingecko",
+      "label": "consulta precios",
+      "labelDy": 16
+    },
+    {
+      "id": "worker-smtp",
+      "from": "worker",
+      "to": "smtp",
+      "label": "envía correos",
+      "toSide": "bottom"
+    },
+    {
+      "id": "scripts-mongo",
+      "from": "scripts",
+      "to": "mongo",
+      "label": "carga datos",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Dos procesos separados",
+      "items": [
+        "La API atiende HTTP y nunca ejecuta jobs",
+        "El worker no tiene servidor HTTP y corre las tareas programadas"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Estado compartido",
+      "items": [
+        "API y worker se comunican solo a través de MongoDB",
+        "Los jobs se coordinan con Agenda (colección agenda_jobs)"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Servicios externos",
+      "items": [
+        "Firebase: identidad. CoinGecko: precios y altas. SMTP: correos",
+        "Redis/BullMQ está planificado pero no implementado"
+      ]
+    }
+  ]
+}

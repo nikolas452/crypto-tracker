@@ -8,7 +8,8 @@ Stage 0's requirements, `requerimientos/02-etapa-1-primer-job.md` for Stage 1's
 requirements, `requerimientos/03-etapa-2-api-rest.md` for Stage 2's requirements,
 `requerimientos/04-etapa-3-auth-firebase.md` for Stage 3's requirements,
 `requerimientos/05-etapa-4-watchlists.md` for Stage 4's requirements, and
-`requerimientos/06-etapa-5-alertas-email.md` for this stage's detailed requirements.
+`requerimientos/06-etapa-5-alertas-email.md` for Stage 5's requirements, and
+`requerimientos/07-etapa-6-agenda.md` for this stage's detailed requirements.
 
 Stage 0 ("base setup") provided the base Express/TypeScript service: startup,
 config validation, MongoDB connection, health checks, a single error format, and
@@ -687,7 +688,7 @@ same `401 UNAUTHENTICATED` as any other unauthenticated request.
 
 ```
 GET /api/v1/admin/job-runs?status=success,partial&limit=2
-X-Admin-Key: <your ADMIN_API_KEY>
+Authorization: Bearer <Firebase ID token of an admin user>
 ```
 
 ```json

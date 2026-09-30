@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Qué puede pedir el cliente a la API y qué datos toca",
+    "output": "09-que-puede-pedir-el-cliente.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "publico",
+      "type": "frontend",
+      "label": "Sin login",
+      "sublabel": "Cualquier cliente",
+      "pos": [
+        40,
+        50
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "usuario",
+      "type": "frontend",
+      "label": "Usuario con token",
+      "sublabel": "Bearer de Firebase",
+      "pos": [
+        40,
+        222
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "admin",
+      "type": "frontend",
+      "label": "Administrador",
+      "sublabel": "Token y rol admin",
+      "pos": [
+        40,
+        395
+      ],
+      "size": [
+        180,
+        66
+      ]
+    },
+    {
+      "id": "precios",
+      "type": "backend",
+      "label": "1. Precios y estado",
+      "sublabel": "GET /coins y /status",
+      "pos": [
+        400,
+        50
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "perfil",
+      "type": "security",
+      "label": "2. Perfil y watchlist",
+      "sublabel": "/me y /me/watchlist",
+      "pos": [
+        400,
+        165
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "alertas",
+      "type": "security",
+      "label": "3. Alertas y avisos",
+      "sublabel": "/me/alerts y /me/notifications",
+      "pos": [
+        400,
+        280
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "administra",
+      "type": "security",
+      "label": "4. Administración",
+      "sublabel": "/admin/*",
+      "pos": [
+        400,
+        395
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "coins",
+      "type": "database",
+      "label": "coins y price_snapshots",
+      "sublabel": "Precios ya guardados",
+      "pos": [
+        800,
+        50
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "usuarios",
+      "type": "database",
+      "label": "users y watchlist_items",
+      "sublabel": "Datos del usuario",
+      "pos": [
+        800,
+        165
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "avisos",
+      "type": "database",
+      "label": "alerts y notifications",
+      "sublabel": "Alertas y cola de correos",
+      "pos": [
+        800,
+        280
+      ],
+      "size": [
+        200,
+        66
+      ]
+    },
+    {
+      "id": "jobs",
+      "type": "database",
+      "label": "job_runs y agenda_jobs",
+      "sublabel": "Corridas y agenda",
+      "pos": [
+        800,
+        395
+      ],
+      "size": [
+        200,
+        66
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "publico-precios",
+      "from": "publico",
+      "to": "precios",
+      "label": "GET",
+      "variant": "emphasis"
+    },
+    {
+      "id": "usuario-perfil",
+      "from": "usuario",
+      "to": "perfil",
+      "label": "perfil y lista"
+    },
+    {
+      "id": "usuario-alertas",
+      "from": "usuario",
+      "to": "alertas",
+      "label": "crea, lee y borra",
+      "variant": "emphasis"
+    },
+    {
+      "id": "admin-administra",
+      "from": "admin",
+      "to": "administra",
+      "label": "consulta y gestiona"
+    },
+    {
+      "id": "precios-coins",
+      "from": "precios",
+      "to": "coins",
+      "label": "solo lee",
+      "variant": "emphasis"
+    },
+    {
+      "id": "perfil-usuarios",
+      "from": "perfil",
+      "to": "usuarios",
+      "label": "lee y escribe"
+    },
+    {
+      "id": "alertas-avisos",
+      "from": "alertas",
+      "to": "avisos",
+      "label": "guarda y consulta",
+      "variant": "emphasis"
+    },
+    {
+      "id": "administra-jobs",
+      "from": "administra",
+      "to": "jobs",
+      "label": "lee y encola",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Qué pide cada uno",
+      "items": [
+        "Sin login: nada, solo GET",
+        "Usuario: token; solo ve lo suyo",
+        "Admin: token, rol admin y sin revocar"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "La API solo responde",
+      "items": [
+        "Los precios se leen de MongoDB, no de CoinGecko",
+        "POST /admin/jobs/:name/run solo encola: 202",
+        "Quien ejecuta el job es el worker"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Efectos internos",
+      "items": [
+        "Crear alerta: se guarda armed, sin evaluar",
+        "Borrar alerta: cancela sus pending",
+        "DELETE /me borra alertas, avisos y watchlist"
+      ]
+    }
+  ]
+}

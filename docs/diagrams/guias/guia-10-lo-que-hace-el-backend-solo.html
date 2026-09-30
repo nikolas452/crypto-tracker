@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Guía 10: Lo que hace el backend solo</title>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--fg:#1c2330;--muted:#5a6578;--line:#dde2ea;--accent:#0b6bcb;--cli-bg:#e1f1ff;--cli-fg:#0a4d94;--bak-bg:#dcf5e6;--bak-fg:#0b6a3a;--amb-bg:#fff0d0;--amb-fg:#8a5300;--code-bg:#eef1f6;--callout:#eef6ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#171e28;--fg:#e6eaf1;--muted:#9aa6b8;--line:#2a3442;--accent:#6db3ff;--cli-bg:#12314f;--cli-fg:#9fd0ff;--bak-bg:#123a25;--bak-fg:#8fe0b3;--amb-bg:#40300d;--amb-fg:#ffd58a;--code-bg:#222b38;--callout:#14263a}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:56rem;margin:0 auto;padding:16px}
+a{color:var(--accent)}
+h1{font-size:1.6rem;line-height:1.25;margin:.4rem 0 .6rem}
+h2{font-size:1.25rem;margin:2rem 0 .75rem;padding-top:.5rem;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:0;line-height:1.3}
+code{background:var(--code-bg);padding:.1em .35em;border-radius:4px;font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+.crumbs{font-size:.9rem;color:var(--muted)}
+.lead{font-size:1.05rem}
+.callout{background:var(--callout);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:.75rem 1rem;margin:1rem 0}
+.frame{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.frame iframe{display:block;width:100%;height:88vh;min-height:520px;max-height:940px;border:0}
+.frame-note{font-size:.9rem;color:var(--muted);margin:.5rem 0 0}
+dl.glossary{display:grid;gap:.6rem;margin:0}
+dl.glossary>div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem}
+dl.glossary dt{font-weight:700}
+dl.glossary dd{margin:.15rem 0 0;color:var(--muted)}
+ol.steps{list-style:none;margin:0;padding:0;display:grid;gap:.9rem}
+.step{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem}
+.step-head{display:flex;gap:.7rem;align-items:center}
+.num{flex:none;width:2rem;height:2rem;border-radius:50%;background:var(--accent);color:var(--bg);display:inline-grid;place-items:center;font-weight:700}
+.tag{display:inline-block;margin:.5rem 0 .2rem;padding:.15rem .6rem;border-radius:999px;font-size:.85rem}
+.tag span{opacity:.85}
+.tag-cli{background:var(--cli-bg);color:var(--cli-fg)}
+.tag-bak{background:var(--bak-bg);color:var(--bak-fg)}
+.tag-amb{background:var(--amb-bg);color:var(--amb-fg)}
+.step p{margin:.35rem 0}
+dl.meta{margin:.5rem 0 0;display:grid;gap:.35rem;font-size:.92rem}
+dl.meta>div{display:grid;grid-template-columns:6.5rem 1fr;gap:.5rem}
+dl.meta dt{color:var(--muted);font-weight:600}
+dl.meta dd{margin:0;min-width:0}
+.env li{margin:.35rem 0}
+nav.pager{display:flex;justify-content:space-between;gap:1rem;margin:2rem 0 1rem;padding-top:1rem;border-top:1px solid var(--line);flex-wrap:wrap}
+@media (max-width:520px){dl.meta>div{grid-template-columns:1fr;gap:.1rem}h1{font-size:1.35rem}}
+</style>
+</head>
+<body>
+<main>
+<p class="crumbs"><a href="../index.html">&larr; Índice de diagramas</a> · Guía 10 de 11</p>
+<h1>Lo que hace el backend solo, sin que nadie lo pida</h1>
+<p class="lead"><strong>Qué responde este diagrama:</strong> qué corre por su cuenta en el worker (y a qué hora), y qué deja listo en MongoDB para que la API lo lea.</p>
+<div class="callout"><strong>Idea clave (la cocina):</strong> el worker no tiene servidor HTTP ni recibe pedidos. Trabaja por reloj y deja sus resultados en MongoDB. No existe ningún mecanismo de push (ni websockets) hacia el cliente: lo único que el backend envía por sí mismo es un correo.</div>
+
+<h2 id="diagrama">El diagrama</h2>
+<div class="frame">
+<iframe src="../diagramas/10-lo-que-hace-el-backend-solo.html" title="Lo que hace el backend solo" loading="lazy"></iframe>
+</div>
+<p class="frame-note"><a href="../diagramas/10-lo-que-hace-el-backend-solo.html" target="_blank" rel="noopener">Abrir el diagrama a pantalla completa</a>. Los textos fijos del visor (botones y leyenda) están en inglés; el contenido del diagrama está en español.</p>
+
+<h2 id="glosario">Mini glosario</h2>
+<dl class="glossary">
+<div><dt>Worker</dt><dd>El programa que trabaja por reloj (<code>npm run dev:worker</code>, <code>src/worker.ts</code>). Es la cocina: nadie le pide nada, prepara las cosas solo. No tiene servidor HTTP.</dd></div>
+<div><dt>Cron</dt><dd>Una regla de horario. <code>*/10 * * * *</code> significa "cada 10 minutos" y <code>15 3 * * *</code> significa "todos los días a las 03:15". Aquí siempre se leen en UTC.</dd></div>
+<div><dt>UTC</dt><dd>La hora de referencia sin huso horario. Los crons del worker se definen en UTC, no en la hora local.</dd></div>
+<div><dt>Job</dt><dd>Una tarea del worker con nombre propio: <code>poll-prices</code>, <code>send-notifications</code> o <code>maintenance</code>. Su lógica está en <code>src/jobs/*</code>.</dd></div>
+<div><dt>Agenda</dt><dd>La librería que dispara los jobs a su hora. Guarda su agenda en la colección <code>agenda_jobs</code> de MongoDB y la revisa cada pocos segundos (<code>AGENDA_PROCESS_EVERY</code>, 10 s).</dd></div>
+<div><dt>Lease</dt><dd>Un candado con vencimiento (colección <code>job_locks</code>, 5 minutos) que evita que dos corridas de <code>poll-prices</code> trabajen a la vez.</dd></div>
+<div><dt>Snapshot</dt><dd>Una "foto" del precio de una moneda en un momento. Se guardan en <code>price_snapshots</code> y expiran a los 90 días.</dd></div>
+<div><dt>Outbox (cola de correos)</dt><dd>La colección <code>notifications</code>: una fila por correo pendiente. Se escribe junto con la alerta y otro proceso la vacía después.</dd></div>
+<div><dt>job_runs</dt><dd>El libro de registro de los jobs: cada corrida deja una fila con su estado (<code>running</code>, <code>success</code>, <code>partial</code>, <code>failed</code>, <code>skipped</code>), duración y contadores.</dd></div>
+</dl>
+
+<h2 id="pasos">Paso a paso</h2>
+<p>Cada paso indica quién lo dispara: el <strong>Cliente</strong> (alguien hace un pedido HTTP), el <strong>Backend solo</strong> (el worker actúa por reloj, sin que nadie pida nada) o <strong>Ambos</strong>. Los nombres de rutas, jobs, estados, colecciones y variables son los reales del código.</p>
+<ol class="steps">
+<li class="step" id="paso-1">
+  <div class="step-head"><span class="num" aria-hidden="true">1</span><h3>El worker arranca</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Al ejecutar <code>npm run dev:worker</code> el proceso exige <code>COINGECKO_API_KEY</code>, <code>SMTP_HOST</code> y <code>MAIL_FROM</code> (los dos últimos traen valores por defecto de desarrollo), verifica el SMTP (si falla solo lo registra y sigue), conecta a MongoDB, comprueba que sea replica set y prepara las colecciones. Marca como <code>failed</code> (código <code>STALE</code>) las corridas que quedaron en <code>running</code> hace más de 15 minutos, define los tres jobs, los registra como recurrentes (sin duplicarlos al reiniciar) y llama a <code>agenda.start()</code>. Si <code>POLL_PRICES_RUN_ON_START</code> está activo (por defecto sí), encola una corrida de <code>poll-prices</code> con <code>trigger: "startup"</code>. Tú lanzas el proceso, pero no interviene ningún cliente HTTP.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Lee y escribe <code>job_runs</code> (recuperación) y <code>agenda_jobs</code> (un documento recurrente por job).</dd></div>
+    <div><dt>Código</dt><dd><code>src/worker.ts</code> <code>src/scheduler/definitions.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-2">
+  <div class="step-head"><span class="num" aria-hidden="true">2</span><h3>El reloj (Agenda) dispara los jobs</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Agenda revisa <code>agenda_jobs</code> cada 10 segundos (<code>AGENDA_PROCESS_EVERY</code>) y ejecuta lo que venció. Los crons son <code>poll-prices</code>: <code>*/10 * * * *</code>, <code>send-notifications</code>: <code>* * * * *</code> y <code>maintenance</code>: <code>15 3 * * *</code>, todos en UTC. Cada job corre de a uno a la vez (<code>concurrency: 1</code>). Por eso una corrida puede empezar hasta unos 10 segundos después de la hora exacta.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Lee <code>agenda_jobs</code> (<code>nextRunAt</code>, <code>disabled</code>, <code>lockedAt</code>).</dd></div>
+    <div><dt>Código</dt><dd><code>src/scheduler/definitions.ts</code> <code>src/scheduler/agenda.ts</code> <code>src/config/constants.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-3">
+  <div class="step-head"><span class="num" aria-hidden="true">3</span><h3>poll-prices: baja los precios y los deja guardados (nodo 1)</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Toma el lease, abre una fila en <code>job_runs</code>, lee las monedas activas, pide los precios a CoinGecko en lotes de hasta 50 ids, omite las monedas cuyo <code>sourceUpdatedAt</code> no cambió, inserta un snapshot por cada moneda con dato nuevo y refresca <code>coins.latest</code>. Trabaja sobre <strong>todas</strong> las monedas activas, no solo las que alguien sigue. Después evalúa las alertas de las monedas con snapshot nuevo (ver guía 04 para el detalle y los estados).</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Lee <code>coins</code> y <code>price_snapshots</code>. Escribe <code>job_locks</code>, <code>job_runs</code>, <code>price_snapshots</code>, <code>coins.latest</code>, <code>alerts</code> y <code>notifications</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/pollPrices.ts</code> <code>src/scheduler/adapters.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-4">
+  <div class="step-head"><span class="num" aria-hidden="true">4</span><h3>Otros disparos de poll-prices</h3></div>
+  <p class="tag tag-amb"><span>Lo dispara:</span> <strong>Ambos</strong></p>
+  <p>Además del cron, <code>poll-prices</code> corre (a) al arrancar el worker (<code>trigger: "startup"</code>), (b) cuando un administrador pide <code>POST /api/v1/admin/jobs/poll-prices/run</code> (<code>trigger: "api"</code>) y (c) como reintento a los 2 minutos si falló por <code>COINGECKO_UNAVAILABLE</code> o <code>COINGECKO_RATE_LIMITED</code> (<code>trigger: "retry"</code>, una sola vez). En (b) el cliente lo pide y el worker lo ejecuta, por eso es "Ambos".</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>agenda_jobs</code> (el documento puntual) y <code>job_runs</code> (con el <code>trigger</code> que corresponda).</dd></div>
+    <div><dt>Código</dt><dd><code>src/worker.ts</code> <code>src/scheduler/retryPolicy.ts</code> <code>src/modules/jobs/jobs.admin.routes.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-5">
+  <div class="step-head"><span class="num" aria-hidden="true">5</span><h3>send-notifications: vacía la cola de correos (nodo 2)</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Corre cada minuto y también de inmediato (<code>agenda.now</code>) cuando una corrida de <code>poll-prices</code> disparó alguna alerta. Primero recupera notificaciones trabadas en <code>sending</code> hace más de 10 minutos. Luego reclama de a una las <code>pending</code> cuyo <code>nextAttemptAt</code> ya llegó (hasta <code>NOTIFY_BATCH_SIZE</code>, es decir 20 por corrida), las envía por SMTP y las marca <code>sent</code>, las reprograma con backoff (1, 5, 15 y 60 minutos) o las deja en <code>failed</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Lee y escribe <code>notifications</code>; lee <code>users</code> (para saber si el usuario aún existe); escribe <code>job_runs</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/sendNotifications.ts</code> <code>src/jobs/notifyBackoff.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-6">
+  <div class="step-head"><span class="num" aria-hidden="true">6</span><h3>maintenance: limpieza diaria a las 03:15 UTC (nodo 3)</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Ejecuta cuatro pasos independientes: marca como <code>failed</code> las corridas colgadas, borra de <code>agenda_jobs</code> los jobs puntuales terminados hace más de 7 días, y deja en el log un aviso si hubo notificaciones <code>failed</code> en las últimas 24 horas o si <code>poll-prices</code> está atrasado (<code>STALE_POLL_THRESHOLD_MIN</code>, 30 min). Un paso que falla solo se registra y la corrida termina siempre en <code>success</code>. Los datos viejos de <code>price_snapshots</code> (90 días), <code>job_runs</code> (30) y <code>notifications</code> (90) los expira MongoDB con índices TTL.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>job_runs</code> y borra en <code>agenda_jobs</code>; lee <code>notifications</code> y <code>job_runs</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/maintenance.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-7">
+  <div class="step-head"><span class="num" aria-hidden="true">7</span><h3>Lo único que el usuario recibe sin pedirlo</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Un correo por SMTP (en local, en Mailpit). No hay push ni websockets: si el cliente quiere saber qué pasó, tiene que consultar él mismo <code>GET /api/v1/me/notifications</code>, <code>GET /api/v1/me/alerts</code> o <code>GET /api/v1/status</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>La API solo lee lo que el worker dejó en <code>notifications</code>, <code>alerts</code> y <code>job_runs</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/integrations/mailer/smtpMailer.ts</code> <code>src/modules/notifications/notifications.routes.ts</code></dd></div>
+  </dl>
+</li>
+</ol>
+
+<h2 id="entorno">Cómo verlo en tu entorno</h2>
+<ul class="env">
+<li>Levanta lo básico: <code>docker compose up</code> (MongoDB como replica set y Mailpit), luego <code>npm run dev</code> (la API queda en <code>http://localhost:3000</code>) y, en otra terminal, <code>npm run dev:worker</code>.</li>
+<li>Logs del worker: en la terminal de <code>npm run dev:worker</code> aparecen líneas como <code>Worker started</code>, <code>poll-prices run started</code> / <code>poll-prices run finished</code> y <code>send-notifications: sent</code>.</li>
+<li><code>GET /api/v1/status</code> (Postman: carpeta <em>Status</em>, pedido <em>Worker status</em>) muestra <code>activeCoins</code> y, en <code>pollPrices</code>: <code>lastRunAt</code>, <code>lastRunStatus</code>, <code>lastSuccessAt</code>, <code>stale</code>, <code>nextRunAt</code> y <code>disabled</code>.</li>
+<li>Para ver las corridas: como admin, <code>GET /api/v1/admin/job-runs</code> (Postman: <em>Admin - Job Runs</em> → <em>List job runs (filtered by jobName + date range)</em>) y <code>GET /api/v1/admin/jobs</code> (<em>Admin - Jobs</em> → <em>List recurring jobs</em>) muestran <code>schedule</code>, <code>nextRunAt</code> y <code>lastJobRun</code> de cada job.</li>
+<li>Para forzar una corrida sin esperar 10 minutos: <em>Admin - Jobs</em> → <em>Trigger a job now</em> (solo encola) o, sin levantar el worker, <code>npm run job:poll-prices</code> (ejecuta una corrida y termina).</li>
+<li>Mailpit: abre <code>http://localhost:8025</code> para ver los correos que envía el worker (recibe por SMTP en el puerto 1025).</li>
+</ul>
+
+<nav class="pager">
+    <a href="guia-09-que-puede-pedir-el-cliente.html">&larr; Guía 09</a>
+    <a href="../index.html">Índice</a>
+    <a href="guia-11-linea-de-tiempo-de-una-alerta.html">Guía 11 &rarr;</a>
+</nav>
+</main>
+</body>
+</html>

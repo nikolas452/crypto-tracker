@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Estados de una alerta de precio",
+    "output": "06-estados-de-alerta.html",
+    "viewBox": [
+      1030,
+      660
+    ],
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "Ciclo normal"
+    },
+    {
+      "id": "terminal",
+      "label": "Fuera de servicio"
+    }
+  ],
+  "states": [
+    {
+      "id": "created",
+      "type": "start",
+      "label": "Creada",
+      "sublabel": "sin evaluar aún",
+      "lane": "main",
+      "col": 0,
+      "step": "01"
+    },
+    {
+      "id": "armed",
+      "type": "active",
+      "label": "armed",
+      "sublabel": "vigilando el precio",
+      "lane": "main",
+      "col": 2,
+      "step": "02"
+    },
+    {
+      "id": "triggered",
+      "type": "waiting",
+      "label": "triggered",
+      "sublabel": "esperando el rearme",
+      "lane": "main",
+      "col": 4,
+      "step": "03"
+    },
+    {
+      "id": "completed",
+      "type": "success",
+      "label": "completed",
+      "sublabel": "alerta de una sola vez",
+      "lane": "terminal",
+      "col": 0
+    },
+    {
+      "id": "disabled",
+      "type": "neutral",
+      "label": "disabled",
+      "sublabel": "apagada por el usuario",
+      "lane": "terminal",
+      "col": 2
+    }
+  ],
+  "transitions": [
+    {
+      "id": "creada",
+      "from": "created",
+      "to": "armed",
+      "label": "crear",
+      "variant": "emphasis"
+    },
+    {
+      "id": "recurrente",
+      "from": "armed",
+      "to": "triggered",
+      "label": "recurring",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "rearme",
+      "from": "triggered",
+      "to": "armed",
+      "label": "rearm o nuevo umbral",
+      "variant": "default",
+      "route": "top-channel"
+    },
+    {
+      "id": "una-vez",
+      "from": "armed",
+      "to": "completed",
+      "label": "once",
+      "variant": "security",
+      "route": "drop"
+    },
+    {
+      "id": "apagar",
+      "from": "triggered",
+      "to": "disabled",
+      "label": "enabled: false",
+      "variant": "dashed",
+      "route": "drop"
+    },
+    {
+      "id": "reactivar",
+      "from": "disabled",
+      "to": "armed",
+      "label": "enabled: true",
+      "variant": "dashed"
+    },
+    {
+      "id": "reactivar-completed",
+      "from": "completed",
+      "to": "armed",
+      "label": "enabled: true",
+      "variant": "dashed",
+      "route": "left-channel"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Qué dispara una alerta",
+      "items": [
+        "El precio cruza el umbral (PRICE_ABOVE, PRICE_BELOW) o el cambio 24h supera el límite",
+        "Si disparó hace menos de cooldownMinutes, se espera y sigue armed"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Rearme",
+      "items": [
+        "Una alerta triggered vuelve a armed cuando el precio se aleja del umbral por rearmPct",
+        "También vuelve a armed si el usuario cambia el umbral"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Apagar y reactivar",
+      "items": [
+        "Desde armed también se puede pasar a disabled con enabled: false",
+        "Reactivar respeta el tope de 20 alertas activas"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Qué atraviesa un request antes de llegar al handler",
+    "output": "02-pipeline-de-un-request.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "req",
+      "type": "frontend",
+      "label": "Request entrante",
+      "sublabel": "TRUST_PROXY: 0 dev, 1 prod",
+      "pos": [
+        40,
+        60
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "ident",
+      "type": "backend",
+      "label": "Identificación y log",
+      "sublabel": "requestId + pino-http",
+      "pos": [
+        330,
+        60
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "seg",
+      "type": "security",
+      "label": "Cabeceras y cuerpo",
+      "sublabel": "helmet + express.json 100kb",
+      "pos": [
+        620,
+        60
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "health",
+      "type": "backend",
+      "label": "/health y /health/ready",
+      "sublabel": "Público, sin límite",
+      "pos": [
+        910,
+        60
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "errorh",
+      "type": "backend",
+      "label": "errorHandler",
+      "sublabel": "{ error: { code, message, requestId } }",
+      "pos": [
+        40,
+        240
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "notfound",
+      "type": "backend",
+      "label": "notFoundHandler",
+      "sublabel": "Ruta inexistente",
+      "pos": [
+        330,
+        240
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "limiter",
+      "type": "security",
+      "label": "Límite por IP en /api",
+      "sublabel": "300 req / 15 min",
+      "pos": [
+        620,
+        240
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "pub",
+      "type": "backend",
+      "label": "Rutas públicas",
+      "sublabel": "/coins y /status",
+      "pos": [
+        330,
+        420
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "priv",
+      "type": "security",
+      "label": "Rutas de usuario",
+      "sublabel": "requireAuth + límite por uid",
+      "pos": [
+        620,
+        420
+      ],
+      "size": [
+        190,
+        70
+      ]
+    },
+    {
+      "id": "admin",
+      "type": "security",
+      "label": "Rutas de administrador",
+      "sublabel": "requireAuth + requireRole",
+      "pos": [
+        910,
+        420
+      ],
+      "size": [
+        190,
+        70
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "req-ident",
+      "from": "req",
+      "to": "ident",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ident-seg",
+      "from": "ident",
+      "to": "seg"
+    },
+    {
+      "id": "seg-health",
+      "from": "seg",
+      "to": "health",
+      "label": "salud"
+    },
+    {
+      "id": "seg-limiter",
+      "from": "seg",
+      "to": "limiter",
+      "label": "rutas /api",
+      "variant": "emphasis",
+      "labelDy": 40
+    },
+    {
+      "id": "limiter-notfound",
+      "from": "limiter",
+      "to": "notfound",
+      "label": "sin coincidencia"
+    },
+    {
+      "id": "notfound-errorh",
+      "from": "notfound",
+      "to": "errorh",
+      "label": "404"
+    },
+    {
+      "id": "limiter-pub",
+      "from": "limiter",
+      "to": "pub",
+      "label": "sin login"
+    },
+    {
+      "id": "limiter-priv",
+      "from": "limiter",
+      "to": "priv",
+      "label": "/me",
+      "labelDy": 40
+    },
+    {
+      "id": "limiter-admin",
+      "from": "limiter",
+      "to": "admin",
+      "label": "/admin"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Público",
+      "items": [
+        "/health no pasa por el limitador",
+        "/coins usa Cache-Control public, 60 s",
+        "/status responde sin caché (no-store)"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Autenticado",
+      "items": [
+        "/me, watchlist, alerts y notifications exigen token",
+        "Límite por usuario: 120 por minuto"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Administrador",
+      "items": [
+        "Verifica que el token no esté revocado",
+        "Luego exige rol admin; si no, 403",
+        "Cualquier error termina en errorHandler"
+      ]
+    }
+  ]
+}

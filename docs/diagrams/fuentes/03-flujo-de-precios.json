@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "Cómo llega un precio de CoinGecko hasta la API",
+    "output": "03-flujo-de-precios.html",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1072,
+      640
+    ]
+  },
+  "stages": [
+    {
+      "label": "Fuente"
+    },
+    {
+      "label": "Worker"
+    },
+    {
+      "label": "MongoDB"
+    },
+    {
+      "label": "API"
+    },
+    {
+      "label": "Consumidor"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "coingecko",
+      "type": "external",
+      "label": "CoinGecko",
+      "sublabel": "Precios en USD",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "poll",
+      "type": "backend",
+      "label": "Job poll-prices",
+      "sublabel": "Cada 10 minutos",
+      "stage": 1,
+      "row": 1
+    },
+    {
+      "id": "snapshots",
+      "type": "database",
+      "label": "price_snapshots",
+      "sublabel": "Historial, 90 días",
+      "stage": 2,
+      "row": 0
+    },
+    {
+      "id": "latest",
+      "type": "database",
+      "label": "coins.latest",
+      "sublabel": "Último precio",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "jobruns",
+      "type": "database",
+      "label": "job_runs",
+      "sublabel": "Corridas del job",
+      "stage": 2,
+      "row": 2
+    },
+    {
+      "id": "apicoins",
+      "type": "backend",
+      "label": "GET /api/v1/coins",
+      "sublabel": "Lista e historial",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "apistatus",
+      "type": "backend",
+      "label": "GET /api/v1/status",
+      "sublabel": "Salud del worker",
+      "stage": 3,
+      "row": 2
+    },
+    {
+      "id": "client",
+      "type": "frontend",
+      "label": "Cliente",
+      "sublabel": "Frontend y admin",
+      "stage": 4,
+      "row": 1
+    }
+  ],
+  "flows": [
+    {
+      "from": "coingecko",
+      "to": "poll",
+      "label": "precios",
+      "variant": "emphasis"
+    },
+    {
+      "from": "poll",
+      "to": "snapshots",
+      "label": "inserta"
+    },
+    {
+      "from": "poll",
+      "to": "latest",
+      "label": "copia",
+      "variant": "emphasis",
+      "labelDx": 26
+    },
+    {
+      "from": "poll",
+      "to": "jobruns",
+      "label": "registra",
+      "variant": "dashed"
+    },
+    {
+      "from": "snapshots",
+      "to": "apicoins",
+      "label": "history y stats",
+      "route": "straight"
+    },
+    {
+      "from": "latest",
+      "to": "apicoins",
+      "label": "precio actual",
+      "variant": "emphasis"
+    },
+    {
+      "from": "jobruns",
+      "to": "apistatus",
+      "label": "última corrida",
+      "variant": "dashed"
+    },
+    {
+      "from": "apicoins",
+      "to": "client",
+      "label": "JSON",
+      "variant": "emphasis"
+    },
+    {
+      "from": "apistatus",
+      "to": "client",
+      "label": "JSON",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Quién escribe",
+      "items": [
+        "Solo el worker escribe precios",
+        "Omite monedas cuya fecha de fuente no cambió",
+        "coins.latest se actualiza con cada snapshot nuevo"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Quién lee",
+      "items": [
+        "La API solo lee y nunca llama a CoinGecko para precios",
+        "La watchlist también lee coins.latest"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Trazabilidad",
+      "items": [
+        "Cada corrida queda en job_runs",
+        "Se ve en /api/v1/status y /api/v1/admin/job-runs"
+      ]
+    }
+  ]
+}

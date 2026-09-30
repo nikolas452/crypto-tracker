@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Guía 06: Estados de una alerta</title>
+<style>
+:root{--bg:#f7f8fa;--card:#fff;--fg:#1c2330;--muted:#5a6578;--line:#dde2ea;--accent:#0b6bcb;--cli-bg:#e1f1ff;--cli-fg:#0a4d94;--bak-bg:#dcf5e6;--bak-fg:#0b6a3a;--amb-bg:#fff0d0;--amb-fg:#8a5300;--code-bg:#eef1f6;--callout:#eef6ff}
+@media (prefers-color-scheme:dark){:root{--bg:#0f141b;--card:#171e28;--fg:#e6eaf1;--muted:#9aa6b8;--line:#2a3442;--accent:#6db3ff;--cli-bg:#12314f;--cli-fg:#9fd0ff;--bak-bg:#123a25;--bak-fg:#8fe0b3;--amb-bg:#40300d;--amb-fg:#ffd58a;--code-bg:#222b38;--callout:#14263a}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:56rem;margin:0 auto;padding:16px}
+a{color:var(--accent)}
+h1{font-size:1.6rem;line-height:1.25;margin:.4rem 0 .6rem}
+h2{font-size:1.25rem;margin:2rem 0 .75rem;padding-top:.5rem;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:0;line-height:1.3}
+code{background:var(--code-bg);padding:.1em .35em;border-radius:4px;font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+.crumbs{font-size:.9rem;color:var(--muted)}
+.lead{font-size:1.05rem}
+.callout{background:var(--callout);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:.75rem 1rem;margin:1rem 0}
+.frame{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--card)}
+.frame iframe{display:block;width:100%;height:88vh;min-height:520px;max-height:940px;border:0}
+.frame-note{font-size:.9rem;color:var(--muted);margin:.5rem 0 0}
+dl.glossary{display:grid;gap:.6rem;margin:0}
+dl.glossary>div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem}
+dl.glossary dt{font-weight:700}
+dl.glossary dd{margin:.15rem 0 0;color:var(--muted)}
+ol.steps{list-style:none;margin:0;padding:0;display:grid;gap:.9rem}
+.step{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem 1rem}
+.step-head{display:flex;gap:.7rem;align-items:center}
+.num{flex:none;width:2rem;height:2rem;border-radius:50%;background:var(--accent);color:var(--bg);display:inline-grid;place-items:center;font-weight:700}
+.tag{display:inline-block;margin:.5rem 0 .2rem;padding:.15rem .6rem;border-radius:999px;font-size:.85rem}
+.tag span{opacity:.85}
+.tag-cli{background:var(--cli-bg);color:var(--cli-fg)}
+.tag-bak{background:var(--bak-bg);color:var(--bak-fg)}
+.tag-amb{background:var(--amb-bg);color:var(--amb-fg)}
+.step p{margin:.35rem 0}
+dl.meta{margin:.5rem 0 0;display:grid;gap:.35rem;font-size:.92rem}
+dl.meta>div{display:grid;grid-template-columns:6.5rem 1fr;gap:.5rem}
+dl.meta dt{color:var(--muted);font-weight:600}
+dl.meta dd{margin:0;min-width:0}
+.env li{margin:.35rem 0}
+nav.pager{display:flex;justify-content:space-between;gap:1rem;margin:2rem 0 1rem;padding-top:1rem;border-top:1px solid var(--line);flex-wrap:wrap}
+@media (max-width:520px){dl.meta>div{grid-template-columns:1fr;gap:.1rem}h1{font-size:1.35rem}}
+</style>
+</head>
+<body>
+<main>
+<p class="crumbs"><a href="../index.html">&larr; Índice de diagramas</a> · Guía 06 de 11</p>
+<h1>Estados de una alerta de precio</h1>
+<p class="lead"><strong>Qué responde este diagrama:</strong> en qué estados puede estar una alerta, qué la hace cambiar de uno a otro y cuáles de esos cambios los pide el cliente y cuáles ocurren solos.</p>
+
+
+<h2 id="diagrama">El diagrama</h2>
+<div class="frame">
+<iframe src="../diagramas/06-estados-de-alerta.html" title="Estados de una alerta" loading="lazy"></iframe>
+</div>
+<p class="frame-note"><a href="../diagramas/06-estados-de-alerta.html" target="_blank" rel="noopener">Abrir el diagrama a pantalla completa</a>. Los textos fijos del visor (botones y leyenda) están en inglés; el contenido del diagrama está en español.</p>
+
+<h2 id="glosario">Mini glosario</h2>
+<dl class="glossary">
+<div><dt>Alerta</dt><dd>Una regla del usuario, por ejemplo "avisar si bitcoin baja de cierto precio". Vive en la colección <code>alerts</code> y tiene un estado (<code>armed</code>, <code>triggered</code>, <code>completed</code>, <code>disabled</code>).</dd></div>
+<div><dt>Rearme (histéresis)</dt><dd>Una alerta disparada no vuelve a vigilar hasta que el precio se aleje del umbral en un porcentaje (<code>rearmPct</code>). Evita avisos repetidos por oscilaciones.</dd></div>
+<div><dt>Worker</dt><dd>El programa que trabaja por reloj (<code>npm run dev:worker</code>, <code>src/worker.ts</code>). Es la cocina: nadie le pide nada, prepara las cosas solo. No tiene servidor HTTP.</dd></div>
+<div><dt>Cliente</dt><dd>Cualquier programa que llame a la API: una web, una app o Postman. En este proyecto todavía no hay front end.</dd></div>
+</dl>
+
+<h2 id="pasos">Paso a paso</h2>
+<p>Cada paso indica quién lo dispara: el <strong>Cliente</strong> (alguien hace un pedido HTTP), el <strong>Backend solo</strong> (el worker actúa por reloj, sin que nadie pida nada) o <strong>Ambos</strong>. Los nombres de rutas, jobs, estados, colecciones y variables son los reales del código.</p>
+<ol class="steps">
+<li class="step" id="paso-1">
+  <div class="step-head"><span class="num" aria-hidden="true">1</span><h3>Creada → armed</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p>El cliente hace <code>POST /api/v1/me/alerts</code>. La alerta nace <code>armed</code>, sin evaluar. Valores por defecto: <code>mode: "recurring"</code>, <code>cooldownMinutes: 60</code> y <code>rearmPct: 1</code>. El tipo (<code>PRICE_ABOVE</code>, <code>PRICE_BELOW</code> o <code>CHANGE_24H_ABS_GTE</code>) no se puede cambiar después.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>alerts</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/alerts/alerts.service.ts</code> <code>src/modules/alerts/alerts.model.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-2">
+  <div class="step-head"><span class="num" aria-hidden="true">2</span><h3>armed → triggered (modo recurring)</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>En una corrida de <code>poll-prices</code> con precio nuevo, si la condición se cumple y no hay cooldown, la alerta pasa a <code>triggered</code> y se anota su correo. Condiciones (inclusivas): <code>PRICE_ABOVE</code> precio mayor o igual al umbral; <code>PRICE_BELOW</code> menor o igual; <code>CHANGE_24H_ABS_GTE</code> cambio 24 h en valor absoluto mayor o igual.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>alerts</code> y <code>notifications</code> (transacción).</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/alertEvaluation.ts</code> <code>src/modules/alerts/alerts.decide.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-3">
+  <div class="step-head"><span class="num" aria-hidden="true">3</span><h3>armed → completed (modo once)</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Igual que el paso anterior, pero si el modo es <code>once</code> la alerta termina en <code>completed</code> y ya no se vuelve a evaluar (salvo que el cliente la reactive).</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>alerts</code> y <code>notifications</code> (transacción).</dd></div>
+    <div><dt>Código</dt><dd><code>src/jobs/alertEvaluation.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-4">
+  <div class="step-head"><span class="num" aria-hidden="true">4</span><h3>Cooldown: sigue armed</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Si la condición se cumple pero la alerta disparó hace menos de <code>cooldownMinutes</code>, no pasa nada: no se escribe ni siquiera <code>lastEvaluatedAt</code>. Sigue <code>armed</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Sin escrituras.</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/alerts/alerts.decide.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-5">
+  <div class="step-head"><span class="num" aria-hidden="true">5</span><h3>triggered → armed (rearme automático)</h3></div>
+  <p class="tag tag-bak"><span>Lo dispara:</span> <strong>Backend solo</strong></p>
+  <p>Una alerta <code>triggered</code> vuelve a <code>armed</code> cuando el precio se aleja del umbral en <code>rearmPct</code> % (<code>PRICE_ABOVE</code>: precio menor que umbral × (1 − rearmPct/100); <code>PRICE_BELOW</code>: mayor que umbral × (1 + rearmPct/100)). Para <code>CHANGE_24H_ABS_GTE</code> el cambio absoluto debe bajar de umbral − <code>rearmPct</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>alerts</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/alerts/alerts.decide.ts</code> <code>src/jobs/alertEvaluation.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-6">
+  <div class="step-head"><span class="num" aria-hidden="true">6</span><h3>triggered → armed (el cliente cambia el umbral)</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p><code>PATCH /api/v1/me/alerts/:id</code> con un nuevo <code>threshold</code> sobre una alerta <code>triggered</code> la rearma sin esperar. No reinicia <code>lastTriggeredAt</code> ni <code>triggerCount</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>alerts</code> (<code>status</code>, <code>version</code>).</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/alerts/alerts.service.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-7">
+  <div class="step-head"><span class="num" aria-hidden="true">7</span><h3>Apagar: cualquier estado → disabled</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p><code>PATCH</code> con <code>enabled: false</code> deja la alerta en <code>disabled</code>, sin importar en qué estado estaba. Una alerta <code>disabled</code> nunca se evalúa.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Escribe <code>alerts</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/alerts/alerts.service.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-8">
+  <div class="step-head"><span class="num" aria-hidden="true">8</span><h3>Reactivar: disabled o completed → armed</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p><code>PATCH</code> con <code>enabled: true</code> sobre una alerta <code>disabled</code> o <code>completed</code> la vuelve a <code>armed</code>, siempre que el usuario no haya llegado al tope de <code>ALERTS_MAX_ACTIVE</code> (20 alertas activas entre <code>armed</code> y <code>triggered</code>; si no, <code>422 LIMIT_REACHED</code>).</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Lee y escribe <code>alerts</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/alerts/alerts.service.ts</code></dd></div>
+  </dl>
+</li>
+<li class="step" id="paso-9">
+  <div class="step-head"><span class="num" aria-hidden="true">9</span><h3>Borrar la alerta</h3></div>
+  <p class="tag tag-cli"><span>Lo dispara:</span> <strong>Cliente</strong></p>
+  <p><code>DELETE /api/v1/me/alerts/:id</code> responde siempre <code>204</code>. Si la alerta existía y era del usuario, se borra y sus notificaciones <code>pending</code> pasan a <code>cancelled</code>.</p>
+  <dl class="meta">
+    <div><dt>MongoDB</dt><dd>Borra en <code>alerts</code>; escribe <code>notifications</code>.</dd></div>
+    <div><dt>Código</dt><dd><code>src/modules/alerts/alerts.service.ts</code> <code>src/modules/notifications/notifications.service.ts</code></dd></div>
+  </dl>
+</li>
+</ol>
+
+<h2 id="entorno">Cómo verlo en tu entorno</h2>
+<ul class="env">
+<li>Levanta lo básico: <code>docker compose up</code> (MongoDB como replica set y Mailpit), luego <code>npm run dev</code> (la API queda en <code>http://localhost:3000</code>) y, en otra terminal, <code>npm run dev:worker</code>.</li>
+<li>Importa <code>crypto-tracker.postman_collection.json</code> en Postman (variable <code>baseUrl</code>) o abre <code>requests.http</code> con la extensión REST Client de VS Code; ambos traen los mismos pedidos. Carpeta <em>My Alerts</em>: <em>Create a PRICE_BELOW alert</em>, <em>Alert detail</em>, <em>Disable an alert</em>, <em>Re-enable an alert</em>, <em>Change threshold (re-arms if triggered)</em> y <em>Delete an alert</em>.</li>
+<li>Observa cada cambio de estado con <em>List my alerts - filtered by status and coin</em> (<code>?status=armed,triggered</code>).</li>
+<li>Para ver un disparo: crea una alerta con una condición que ya se cumpla, dispara <code>poll-prices</code> (<em>Admin - Jobs</em> → <em>Trigger a job now</em>) y vuelve a consultar el estado. Recuerda que solo se evalúan las monedas con precio nuevo en esa corrida.</li>
+<li>Mailpit: abre <code>http://localhost:8025</code> para ver los correos que envía el worker (recibe por SMTP en el puerto 1025).</li>
+</ul>
+
+<nav class="pager">
+    <a href="guia-05-alerta-a-email.html">&larr; Guía 05</a>
+    <a href="../index.html">Índice</a>
+    <a href="guia-07-estados-de-notificacion.html">Guía 07 &rarr;</a>
+</nav>
+</main>
+</body>
+</html>

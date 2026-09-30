@@ -1,0 +1,272 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Una corrida del job poll-prices y cómo termina",
+    "output": "04-corrida-poll-prices.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    {
+      "id": "prep",
+      "label": "Preparación"
+    },
+    {
+      "id": "trabajo",
+      "label": "Trabajo con precios"
+    },
+    {
+      "id": "cierre",
+      "label": "Resultado de la corrida"
+    }
+  ],
+  "mainPath": [
+    "lease",
+    "run",
+    "coins",
+    "fetch",
+    "snaps",
+    "latest",
+    "alerts",
+    "success"
+  ],
+  "nodes": [
+    {
+      "id": "lease",
+      "lane": "prep",
+      "col": 0,
+      "type": "security",
+      "label": "Tomar lease",
+      "sublabel": "job_locks, 5 min",
+      "width": 132
+    },
+    {
+      "id": "run",
+      "lane": "prep",
+      "col": 1,
+      "type": "database",
+      "label": "Abrir corrida",
+      "sublabel": "job_runs: running",
+      "width": 132
+    },
+    {
+      "id": "coins",
+      "lane": "prep",
+      "col": 2,
+      "type": "database",
+      "label": "Monedas activas",
+      "sublabel": "leer coins",
+      "width": 132
+    },
+    {
+      "id": "fetch",
+      "lane": "trabajo",
+      "col": 2,
+      "type": "external",
+      "label": "Pedir precios",
+      "sublabel": "CoinGecko",
+      "width": 132
+    },
+    {
+      "id": "snaps",
+      "lane": "trabajo",
+      "col": 3,
+      "type": "database",
+      "label": "Guardar snapshots",
+      "sublabel": "omite sin cambios",
+      "width": 132
+    },
+    {
+      "id": "latest",
+      "lane": "trabajo",
+      "col": 4,
+      "type": "database",
+      "label": "Refrescar latest",
+      "sublabel": "coins.latest",
+      "width": 132
+    },
+    {
+      "id": "alerts",
+      "lane": "trabajo",
+      "col": 5,
+      "type": "backend",
+      "label": "Evaluar alertas",
+      "sublabel": "puede disparar",
+      "width": 132
+    },
+    {
+      "id": "skipped",
+      "lane": "cierre",
+      "col": 0,
+      "type": "messagebus",
+      "label": "skipped",
+      "sublabel": "locked o sin monedas",
+      "width": 132
+    },
+    {
+      "id": "failed",
+      "lane": "cierre",
+      "col": 2,
+      "type": "security",
+      "label": "failed",
+      "sublabel": "sin precios o error",
+      "width": 132
+    },
+    {
+      "id": "retry",
+      "lane": "cierre",
+      "col": 3,
+      "type": "messagebus",
+      "label": "Reintento",
+      "sublabel": "2 min después, 1 vez",
+      "width": 132
+    },
+    {
+      "id": "partial",
+      "lane": "cierre",
+      "col": 4,
+      "type": "security",
+      "label": "partial",
+      "sublabel": "snapshots se conservan",
+      "width": 132
+    },
+    {
+      "id": "success",
+      "lane": "cierre",
+      "col": 5,
+      "type": "backend",
+      "label": "success",
+      "sublabel": "todo salió bien",
+      "width": 132
+    }
+  ],
+  "edges": [
+    {
+      "id": "lease-run",
+      "from": "lease",
+      "to": "run",
+      "label": "libre",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "run-coins",
+      "from": "run",
+      "to": "coins",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "coins-fetch",
+      "from": "coins",
+      "to": "fetch",
+      "label": "hay monedas",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "fetch-snaps",
+      "from": "fetch",
+      "to": "snaps",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "snaps-latest",
+      "from": "snaps",
+      "to": "latest",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "latest-alerts",
+      "from": "latest",
+      "to": "alerts",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "alerts-success",
+      "from": "alerts",
+      "to": "success",
+      "label": "sin errores",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "lease-skipped",
+      "from": "lease",
+      "to": "skipped",
+      "label": "ocupado",
+      "role": "branch",
+      "variant": "dashed"
+    },
+    {
+      "id": "coins-skipped",
+      "from": "coins",
+      "to": "skipped",
+      "label": "sin monedas",
+      "role": "branch",
+      "variant": "dashed"
+    },
+    {
+      "id": "fetch-failed",
+      "from": "fetch",
+      "to": "failed",
+      "label": "sin datos",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "latest-partial",
+      "from": "latest",
+      "to": "partial",
+      "label": "fallo",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "failed-retry",
+      "from": "failed",
+      "to": "retry",
+      "label": "error transitorio",
+      "role": "branch",
+      "variant": "dashed"
+    },
+    {
+      "id": "alerts-partial",
+      "from": "alerts",
+      "to": "partial",
+      "label": "fallo",
+      "role": "error",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Cuatro resultados",
+      "items": [
+        "success: todo salió bien",
+        "partial: falló latest o la evaluación, o faltan monedas",
+        "failed: sin precios o error inesperado",
+        "skipped: lease ocupado o sin monedas activas"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Reintento",
+      "items": [
+        "Solo failed con COINGECKO_UNAVAILABLE o COINGECKO_RATE_LIMITED",
+        "Se omite si la próxima corrida está a menos de 3 minutos"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Después de disparar alertas",
+      "items": [
+        "Si alguna alerta se disparó, se lanza send-notifications de inmediato"
+      ]
+    }
+  ]
+}
