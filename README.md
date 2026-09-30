@@ -87,6 +87,19 @@ and "API endpoints (Stage 6 — Agenda admin jobs)" below for the full
 contract, and "Known limitations" for the divergences this stage found
 against Agenda 6.2.6's actual (rather than documented) behavior.
 
+**Stage 7 ("deploy-render")** moves the API off a developer's own machine:
+a production build (`dist/`, no `tsx`/`pino-pretty` at runtime), `render.yaml`
+describing a single free Render web service, a MongoDB Atlas M0 cluster,
+production-only configuration validation, `db:setup` for explicit index
+management, HSTS and an admin IP diagnostic, and `npm run smoke` as the
+post-deploy check. **The scope is adapted to the project's real
+constraints** — it must cost $0 and the server is only ever started to
+test — so **only the API is deployed**; the worker (`poll-prices`,
+`send-notifications`, `maintenance`) keeps running locally, against either
+the local database or the Atlas one, whenever a testing session needs it.
+See "Deployment (Stage 7)" below for the full scope adaptation, what stays
+out of scope and why, and `docs/runbook.md` for the operational procedures.
+
 ## Requirements
 
 - Node.js **24.x** (see `.node-version`). `engines.node` in `package.json` enforces
@@ -138,6 +151,7 @@ against Agenda 6.2.6's actual (rather than documented) behavior.
 | `PORT`                        | integer                                 | No                           | `3000`                                           | 1–65535                                                                                                                                                                                                                                                                                                                                        |
 | `MONGODB_URI`                 | string                                  | **Yes**                      | —                                                | Must start with `mongodb://` or `mongodb+srv://`                                                                                                                                                                                                                                                                                               |
 | `MONGODB_DB_NAME`             | string                                  | No                           | `crypto_tracker`                                 | Non-empty                                                                                                                                                                                                                                                                                                                                      |
+| `MONGODB_MAX_POOL_SIZE`       | integer                                 | No                           | `10`                                              | Explicit Mongoose `maxPoolSize`, so a deployment never approaches the cluster's connection limit (500 on an Atlas M0) |
 | `LOG_LEVEL`                   | pino level                              | No                           | `info`                                           | `fatal`\|`error`\|`warn`\|`info`\|`debug`\|`trace`\|`silent`                                                                                                                                                                                                                                                                                   |
 | `SHUTDOWN_TIMEOUT_MS`         | integer                                 | No                           | `10000`                                          | >= 1000                                                                                                                                                                                                                                                                                                                                        |
 | `COINGECKO_API_KEY`           | string                                  | **Yes**                      | —                                                | CoinGecko Demo plan key. Optional at the schema level (so `parseEnv` stays testable without it), but every entrypoint that can touch CoinGecko fails fast if it's missing: `worker.ts`, `seed:coins`, `job:poll-prices` and, since Stage 4, the API itself (`server.ts`) — its admin coin endpoints call CoinGecko to validate a `coingeckoId` |
@@ -152,15 +166,15 @@ against Agenda 6.2.6's actual (rather than documented) behavior.
 | `JOB_RUNS_RETENTION_DAYS`     | integer                                 | No                           | `30`                                             | TTL for `job_runs`                                                                                                                                                                                                                                                                                                                             |
 | `STALE_RUN_THRESHOLD_MIN`     | integer                                 | No                           | `15`                                             | A `running` `JobRun` older than this is recovered as `failed`/`STALE` on worker startup                                                                                                                                                                                                                                                        |
 | `WORKER_SHUTDOWN_TIMEOUT_MS`  | integer                                 | No                           | `30000`                                          | Max time the worker waits for an in-progress run to finish during shutdown                                                                                                                                                                                                                                                                     |
-| `TRUST_PROXY`                 | integer                                 | No                           | `0` in `development`/`test`, `1` in `production` | Passed to Express's `app.set('trust proxy', ...)`; controls which hop the rate limiter trusts for the client IP when behind a reverse proxy                                                                                                                                                                                                    |
+| `TRUST_PROXY`                 | integer                                 | No in dev/test, **Yes in production** | `0` in `development`/`test`, no default in `production` | Passed to Express's `app.set('trust proxy', ...)`; controls which hop the rate limiter trusts for the client IP when behind a reverse proxy. Since Stage 7, `NODE_ENV=production` requires it explicitly and rejects `0` — no silent default there (spec production-config, **E7-11**) |
 | `RATE_LIMIT_MAX`              | integer                                 | No                           | `300`                                            | Max requests per IP per `RATE_LIMIT_WINDOW_MIN` window, enforced on `/api` (not `/health`)                                                                                                                                                                                                                                                     |
 | `RATE_LIMIT_WINDOW_MIN`       | integer                                 | No                           | `15`                                             | Rate-limit window length, in minutes                                                                                                                                                                                                                                                                                                           |
 | `STALE_POLL_THRESHOLD_MIN`    | integer                                 | No                           | `30`                                             | `GET /api/v1/status` reports `pollPrices.stale: true` when no `success`/`partial` `poll-prices` run finished within this many minutes                                                                                                                                                                                                          |
-| `FIREBASE_PROJECT_ID`         | string                                  | **Only without an emulator** | —                                                | Firebase project id. Required together with `FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` unless `FIREBASE_AUTH_EMULATOR_HOST` is set (`assertFirebaseCredentials`)                                                                                                                                                                           |
-| `FIREBASE_CLIENT_EMAIL`       | string                                  | **Only without an emulator** | —                                                | Service account client email, from the same JSON key as `FIREBASE_PRIVATE_KEY`                                                                                                                                                                                                                                                                 |
-| `FIREBASE_PRIVATE_KEY`        | string (**secret**)                     | **Only without an emulator** | —                                                | Service account private key. Escaped `\n` sequences are normalized to real newlines at startup; never log or commit this value                                                                                                                                                                                                                 |
-| `FIREBASE_WEB_API_KEY`        | string                                  | No                           | —                                                | Only used by the `auth:token` dev script to call the Identity Toolkit REST API; the API process itself never needs it. Optional when `FIREBASE_AUTH_EMULATOR_HOST` is set (the emulator ignores the key's value)                                                                                                                               |
-| `FIREBASE_AUTH_EMULATOR_HOST` | string                                  | No (dev only)                | —                                                | e.g. `127.0.0.1:9099`. Points both `firebase-admin` and the dev scripts at the local Auth emulator instead of a real Firebase project. The process refuses to start if this is set while `NODE_ENV=production` (E3-13)                                                                                                                         |
+| `FIREBASE_PROJECT_ID`         | string                                  | **Only without an emulator; always required in production** | —                                                | Firebase project id. Required together with `FIREBASE_CLIENT_EMAIL`/`FIREBASE_PRIVATE_KEY` unless `FIREBASE_AUTH_EMULATOR_HOST` is set (`assertFirebaseCredentials`). Since Stage 7, `NODE_ENV=production` requires all three regardless of any emulator setting (spec production-config, **E7-11**) |
+| `FIREBASE_CLIENT_EMAIL`       | string                                  | **Only without an emulator; always required in production** | —                                                | Service account client email, from the same JSON key as `FIREBASE_PRIVATE_KEY`                                                                                                                                                                                                                                                                 |
+| `FIREBASE_PRIVATE_KEY`        | string (**secret**)                     | **Only without an emulator; always required in production** | —                                                | Service account private key. Escaped `\n` sequences are normalized to real newlines at startup; never log or commit this value                                                                                                                                                                                                                 |
+| `FIREBASE_WEB_API_KEY`        | string                                  | No; **forbidden in production**   | —                                                | Only used by the `auth:token` dev script to call the Identity Toolkit REST API; the API process itself never needs it. Optional when `FIREBASE_AUTH_EMULATOR_HOST` is set (the emulator ignores the key's value). Since Stage 7, the process refuses to start if this is set while `NODE_ENV=production` |
+| `FIREBASE_AUTH_EMULATOR_HOST` | string                                  | No (dev only)                | —                                                | e.g. `127.0.0.1:9099`. Points both `firebase-admin` and the dev scripts at the local Auth emulator instead of a real Firebase project. The process refuses to start if this is set while `NODE_ENV=production` (E3-13, reinforced by the Stage 7 production-config validation) |
 | `USER_RATE_LIMIT_PER_MIN`     | integer                                 | No                           | `120`                                            | Per-`uid` request budget, enforced after `requireAuth` in addition to the global per-IP limiter                                                                                                                                                                                                                                                |
 | `LAST_SEEN_THROTTLE_MIN`      | integer                                 | No                           | `5`                                              | Minimum age of `lastSeenAt` before an authenticated request refreshes it                                                                                                                                                                                                                                                                       |
 | `WATCHLIST_MAX_ITEMS`         | integer                                 | No                           | `50`                                             | Per-user cap on `watchlist_items` (spec watchlist-store). Checked before insert, not atomically — see "The watchlist item cap" below                                                                                                                                                                                                           |
@@ -222,6 +236,8 @@ endpoints (Stage 2)" below.
 | `npm run user:set-role`         | Finds a user by email and sets its Mongo `role`: `npm run user:set-role -- --email <e> --role <user\|admin>` (Stage 3). Prints the previous → new role, or an actionable error if the user has no profile yet          |
 | `npm run perf:watchlist`        | Seeds one user with 50 watchlist items and measures RNF-4.1 latency for `GET /api/v1/me/watchlist` (Stage 4) — see "Performance (RNF-4.1)" below                                                                       |
 | `npm run perf:alerts-evaluation`| Seeds 1,000 alerts across 10 coins (none triggering) and measures RNF-5.1 latency for `evaluateAlerts`, the alert-evaluation step inside `poll-prices` (Stage 5) — see "Performance (RNF-5.1)" below                    |
+| `npm run db:setup`              | Idempotently syncs every declared Mongoose index (`ensureCollections()` then per-model `syncIndexes()`), logging the create/drop diff before applying it; `-- --dry-run` only prints the diff (Stage 7). **`syncIndexes()` drops any index not declared in its model's schema** — review the diff with `--dry-run` before running it for real if you ever created an index by hand |
+| `npm run smoke`                 | Post-deploy check against a real URL: `npm run smoke -- --url <api>` runs five checks (liveness, readiness, a coin read, status, unauthenticated `/me`) and exits non-zero on failure; tolerates the free plan's cold start and treats `stale: true` as a warning, not a failure (Stage 7) — see `docs/runbook.md` |
 
 ## Background worker (Stage 6 — Agenda)
 
@@ -1323,6 +1339,78 @@ evaluation cursor to alerts on coins that actually changed in this run, and
 `decide()` itself is a pure in-memory function with no per-alert database
 round trip. Re-run `npm run perf:alerts-evaluation` to reproduce; numbers
 vary with hardware.
+
+## Deployment (Stage 7)
+
+The API deploys to a single free [Render](https://render.com) web service,
+described as infrastructure-as-code in `render.yaml` at the repository
+root, backed by a MongoDB Atlas M0 (free tier) cluster. See
+`docs/runbook.md` for deploying, rolling back, rotating secrets, and the
+failure playbooks — this section covers what's in scope and, just as
+importantly, what deliberately isn't.
+
+### Scope adaptation: free tier only, and the worker stays local
+
+The requirement document this project follows offers two shapes for
+running the scheduler continuously in the cloud. **Neither fits this
+project's actual constraints** — it must cost **$0**, and the server is
+started only to test, never run continuously:
+
+- A dedicated background-worker/cron service has no free instance on
+  Render — it costs money.
+- Keeping a free web service awake 24/7 with an external scheduled trigger
+  (so its own scheduler never stops) would consume nearly the entire free
+  workspace-hours allowance to poll prices nobody is watching between
+  sessions.
+
+So **only the API is deployed**. It runs as a free web service that sleeps
+after 15 minutes of no traffic and wakes on the next request — a feature
+here, not a defect, since the system is only ever visited deliberately. The
+worker is never deployed to the cloud: it runs locally, against either the
+local replica set or the Atlas cluster, started by hand whenever a testing
+session needs fresh data (see "A stale status" in `docs/runbook.md`).
+
+### Explicitly out of scope
+
+The following are deliberately not built, along with the acceptance
+criteria they carry — a later reader should not read these as unmet
+obligations, they're scoped out on purpose:
+
+- **A deployed background worker or cron service**, and any paid plan —
+  with it, **E7-4** (worker-produced job runs appearing in Atlas every 10
+  minutes from a cloud process).
+- **The internal `POST /api/v1/internal/jobs/run-cycle` endpoint**,
+  `INTERNAL_API_KEY`, `RUN_CYCLE_TIMEOUT_MS` and `WORKER_MODE` — with them,
+  **E7-5** and **E7-6**.
+- **A scheduled GitHub Actions trigger workflow** that would curl the API
+  to keep a scheduler alive, along with its free-Actions-minutes budgeting
+  and the 60-day public-repository workflow-inactivity rule.
+- **An external uptime monitor** with a keyword check on `stale` — with it,
+  **E7-10**.
+- **Real-inbox email delivery in production** — with it, **E7-7** — because
+  mail already stays scoped to a local Mailpit instance (Stage 5); the
+  worker (the only process that sends mail) never runs in the cloud here
+  either.
+- **RNF-7.3** (no lost or duplicated jobs across a *worker* deploy), which
+  presupposes a deployed worker that doesn't exist in this shape.
+- **RNF-7.4** (a monthly CoinGecko call budget for a continuously-running
+  worker), which stops being a binding constraint once the worker only ever
+  runs during testing sessions — see "CoinGecko quota" above.
+
+A direct consequence of nothing connecting to Atlas continuously: the M0
+cluster can auto-pause after 30 days without a connection. Accepted, and
+handled in `docs/runbook.md` ("Atlas cluster auto-paused") rather than
+engineered around.
+
+### Performance (RNF-7.5)
+
+p95 latency of `GET /api/v1/coins` against the deployed, awake API from the
+owner's location, and the chosen Render/Atlas region pairing, are recorded
+once the real deployment exists — see `docs/runbook.md` ("MongoDB Atlas
+(M0 free tier)") for the planned region pairing and how to reproduce this
+measurement (`curl -w '%{time_total}\n' -o /dev/null -s https://<api>/api/v1/coins`,
+repeated, or `npm run smoke` timing). This session did not have a live
+Render/Atlas deployment to measure against.
 
 ## Known limitations
 

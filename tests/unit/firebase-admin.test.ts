@@ -6,7 +6,7 @@ import {
   initializeFirebaseAdmin,
   normalizePrivateKey,
 } from '../../src/integrations/firebase/admin.js';
-import { parseEnv } from '../../src/config/env.js';
+import { parseEnv, type Config } from '../../src/config/env.js';
 
 /**
  * Tests unitarios de `src/integrations/firebase/admin.ts`: normalización de
@@ -80,13 +80,18 @@ describe('initializeFirebaseAdmin', () => {
     expect(logger.fatal).not.toHaveBeenCalled();
   });
 
-  // E3-13.
+  // E3-13. Desde Stage 7 (production-config), `parseEnv` ya rechaza esta
+  // combinación al arrancar — no se puede construir con `parseEnv` (ver
+  // "parseEnv in production mode" en config-env.test.ts). Este test sigue
+  // ejercitando la guarda PROPIA de `initializeFirebaseAdmin`, que queda
+  // como defensa en profundidad para cualquier caller que reciba un
+  // `Config` armado a mano en lugar de pasar por `parseEnv`.
   it('logs fatal and exits with code 1 when the emulator is set in production', () => {
-    const cfg = parseEnv({
-      MONGODB_URI: 'mongodb://localhost:27017',
+    const cfg: Config = {
+      ...parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' }),
       NODE_ENV: 'production',
       FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099',
-    });
+    };
     const logger = fakeLogger();
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 

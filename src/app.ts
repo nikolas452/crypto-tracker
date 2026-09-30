@@ -18,6 +18,7 @@ import {
   cacheControlPublic,
 } from './middlewares/cacheControl.js';
 import { createHealthRouter } from './routes/health.routes.js';
+import { createAdminDebugRouter } from './routes/adminDebug.routes.js';
 import { createCoinsRouter } from './modules/coins/coins.routes.js';
 import { createAdminCoinsRouter } from './modules/coins/coins.admin.routes.js';
 import { createStatusRouter } from './modules/status/status.routes.js';
@@ -210,7 +211,15 @@ export function createApp(deps: CreateAppDeps = {}): Express {
 
   app.use(requestId);
   app.use(createRequestLogger(logger));
-  app.use(helmet());
+  // HSTS explícito solo en producción (spec production-http-security, tarea
+  // 6.1): la plataforma termina TLS ahí, así que tiene sentido pedirle al
+  // navegador que solo vuelva por HTTPS; en desarrollo, sobre HTTP plano, el
+  // header no aporta nada.
+  app.use(
+    helmet({
+      hsts: config.NODE_ENV === 'production' ? { maxAge: 31536000, includeSubDomains: true } : false,
+    }),
+  );
   app.use(express.json({ limit: '100kb' }));
   app.disable('x-powered-by');
 
@@ -281,6 +290,9 @@ export function createApp(deps: CreateAppDeps = {}): Express {
   // Spec admin-notifications-api: listado con diagnóstico completo, reintento
   // atómico y email de prueba inmediato que bypassea el outbox.
   app.use('/api/v1/admin/notifications', createAdminNotificationsRouter(mailer));
+  // Spec production-http-security tarea 6.4: prueba que `trust proxy` resuelve
+  // la IP pública real del caller detrás del proxy de la plataforma (E7-9).
+  app.use('/api/v1/admin/debug', createAdminDebugRouter());
 
   if (deps.registerTestRoutes) {
     deps.registerTestRoutes(app);

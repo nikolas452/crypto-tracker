@@ -18,6 +18,7 @@ describe('parseEnv', () => {
       PORT: 3000,
       MONGODB_URI: 'mongodb://localhost:27017',
       MONGODB_DB_NAME: 'crypto_tracker',
+      MONGODB_MAX_POOL_SIZE: 10,
       LOG_LEVEL: 'info',
       SHUTDOWN_TIMEOUT_MS: 10000,
       COINGECKO_BASE_URL: 'https://api.coingecko.com/api/v3',
@@ -223,17 +224,14 @@ describe('parseEnv', () => {
     expect(config.TRUST_PROXY).toBe(0);
   });
 
-  it('defaults TRUST_PROXY to 1 in production', () => {
-    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', NODE_ENV: 'production' });
-
-    expect(config.TRUST_PROXY).toBe(1);
-  });
-
-  it('honors an explicit TRUST_PROXY over the NODE_ENV-derived default', () => {
+  it('honors an explicit TRUST_PROXY in production (no silent default there — see "parseEnv in production mode" below)', () => {
     const config = parseEnv({
       MONGODB_URI: 'mongodb://localhost:27017',
       NODE_ENV: 'production',
       TRUST_PROXY: '2',
+      FIREBASE_PROJECT_ID: 'demo-project',
+      FIREBASE_CLIENT_EMAIL: 'sa@demo-project.iam.gserviceaccount.com',
+      FIREBASE_PRIVATE_KEY: 'fake-key',
     });
 
     expect(config.TRUST_PROXY).toBe(2);
@@ -295,6 +293,103 @@ describe('parseEnv', () => {
     });
 
     expect(config).not.toHaveProperty('ADMIN_API_KEY');
+  });
+});
+
+/**
+ * Validación adicional de producción (spec production-config, deploy-render
+ * tarea 2.5, E7-11): variables extra exigidas, variables prohibidas, y
+ * `TRUST_PROXY >= 1`.
+ */
+describe('parseEnv in production mode', () => {
+  const validProductionSource = {
+    MONGODB_URI: 'mongodb://localhost:27017',
+    NODE_ENV: 'production',
+    TRUST_PROXY: '1',
+    FIREBASE_PROJECT_ID: 'demo-project',
+    FIREBASE_CLIENT_EMAIL: 'sa@demo-project.iam.gserviceaccount.com',
+    FIREBASE_PRIVATE_KEY: 'fake-key',
+  } as const;
+
+  it('accepts a fully-configured production source', () => {
+    const config = parseEnv(validProductionSource);
+
+    expect(config.NODE_ENV).toBe('production');
+    expect(config.TRUST_PROXY).toBe(1);
+  });
+
+  it('rejects a missing TRUST_PROXY in production', () => {
+    const { TRUST_PROXY: _omit, ...source } = validProductionSource;
+
+    try {
+      parseEnv(source);
+      expect.unreachable('parseEnv should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvValidationError);
+      const envError = error as EnvValidationError;
+      expect(envError.issues.some((issue) => issue.variable === 'TRUST_PROXY')).toBe(true);
+    }
+  });
+
+  it('rejects a TRUST_PROXY of 0 in production', () => {
+    try {
+      parseEnv({ ...validProductionSource, TRUST_PROXY: '0' });
+      expect.unreachable('parseEnv should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvValidationError);
+      const envError = error as EnvValidationError;
+      expect(envError.issues.some((issue) => issue.variable === 'TRUST_PROXY')).toBe(true);
+    }
+  });
+
+  it.each(['FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY'] as const)(
+    'rejects a missing %s in production',
+    (variable) => {
+      const source = { ...validProductionSource };
+      delete (source as Record<string, string>)[variable];
+
+      try {
+        parseEnv(source);
+        expect.unreachable('parseEnv should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(EnvValidationError);
+        const envError = error as EnvValidationError;
+        expect(envError.issues.some((issue) => issue.variable === variable)).toBe(true);
+      }
+    },
+  );
+
+  it('rejects FIREBASE_AUTH_EMULATOR_HOST in production', () => {
+    try {
+      parseEnv({ ...validProductionSource, FIREBASE_AUTH_EMULATOR_HOST: '127.0.0.1:9099' });
+      expect.unreachable('parseEnv should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvValidationError);
+      const envError = error as EnvValidationError;
+      expect(
+        envError.issues.some((issue) => issue.variable === 'FIREBASE_AUTH_EMULATOR_HOST'),
+      ).toBe(true);
+    }
+  });
+
+  it('rejects FIREBASE_WEB_API_KEY in production', () => {
+    try {
+      parseEnv({ ...validProductionSource, FIREBASE_WEB_API_KEY: 'some-web-key' });
+      expect.unreachable('parseEnv should have thrown');
+    } catch (error) {
+      expect(error).toBeInstanceOf(EnvValidationError);
+      const envError = error as EnvValidationError;
+      expect(envError.issues.some((issue) => issue.variable === 'FIREBASE_WEB_API_KEY')).toBe(
+        true,
+      );
+    }
+  });
+
+  it('does not apply the extra production requirements outside production', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.NODE_ENV).toBe('development');
+    expect(config.TRUST_PROXY).toBe(0);
   });
 });
 

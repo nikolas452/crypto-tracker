@@ -1,0 +1,80 @@
+# Render Blueprint (spec render-blueprint, deploy-render tareas 4.1-4.5).
+# Describe exactamente UN servicio: la API en un web service del plan free.
+# No hay worker ni cron: el scheduler (Agenda) sigue corriendo solo
+# localmente durante las sesiones de testing (ver design.md "Decisions").
+#
+# Región: virginia (US East) — de las cinco regiones que ofrece Render
+# (oregon, ohio, virginia, frankfurt, singapore), es la geográficamente más
+# cercana a Sudamérica, donde vive el proyecto (ver MAIL_DISPLAY_TIMEZONE en
+# .env.example). El cluster de Atlas M0 (tarea 3.1) debe crearse en una
+# región AWS cercana (por ejemplo us-east-1, N. Virginia) para emparejar con
+# esta — Render no publica el mapeo exacto región-Render -> región-AWS, así
+# que esta elección se confirma/ajusta una vez creado el cluster real; ver
+# docs/runbook.md.
+#
+# Validado a mano contra la especificación de blueprints de Render
+# (https://render.com/docs/blueprint-spec, tarea 4.5) al momento de escribir
+# este archivo: `type`, `runtime`, `plan`, `region`, `buildCommand`,
+# `startCommand`, `healthCheckPath`, `autoDeployTrigger`, `envVarGroups` y
+# `fromGroup` son campos válidos del spec actual. Una variable `sync: false`
+# NO puede declararse dentro de un `envVarGroups` (restricción real de la
+# plataforma) — por eso los secretos viven en el `envVars` del propio
+# servicio, y el grupo compartido solo contiene configuración no sensible.
+
+envVarGroups:
+  - name: crypto-tracker-shared
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Un hop detrás del proxy inverso de Render (spec production-config:
+      # TRUST_PROXY debe ser >= 1 en producción, sin default silencioso).
+      - key: TRUST_PROXY
+        value: '1'
+      - key: LOG_LEVEL
+        value: info
+      - key: MONGODB_DB_NAME
+        value: crypto_tracker
+      # Explícito para no acercarse al límite de conexiones del cluster
+      # (500 en un Atlas M0) — spec db-connection.
+      - key: MONGODB_MAX_POOL_SIZE
+        value: '10'
+      # El worker nunca corre en la nube en este deployment (design.md
+      # "Scope adaptation"), así que el chequeo opcional `coingecko` de
+      # /health/ready se deja deshabilitado por defecto también en
+      # producción — una caída de CoinGecko no debe sacar a la API de
+      # rotación.
+      - key: COINGECKO_READINESS_ENABLED
+        value: 'false'
+
+services:
+  - type: web
+    name: crypto-tracker-api
+    runtime: node
+    plan: free
+    region: virginia
+    envVars:
+      - fromGroup: crypto-tracker-shared
+      # Secretos: SIEMPRE sync: false, nunca un valor literal acá (spec
+      # render-blueprint "No secret values in the blueprint", E7-8). Se
+      # cargan una sola vez desde el dashboard de Render al crear el
+      # blueprint — ver docs/runbook.md.
+      - key: MONGODB_URI
+        sync: false
+      - key: COINGECKO_API_KEY
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/server.js
+    # Readiness, no liveness (spec render-blueprint "Readiness-gated
+    # deploy"): la plataforma solo enruta tráfico a la instancia nueva una
+    # vez que /health/ready responde 200, así que un deploy nunca corta
+    # tráfico en vuelo (E7-3).
+    healthCheckPath: /health/ready
+    # Solo despliega un commit cuyos checks de CI (typecheck/lint/test) ya
+    # pasaron — un build roto nunca llega a producción (E7-1).
+    autoDeployTrigger: checksPass

@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "db:setup": "tsx --env-file-if-exists=.env src/scripts/dbSetup.ts",
     "seed:coins": "tsx --env-file-if-exists=.env src/scripts/seedCoins.ts",
     "job:poll-prices": "tsx --env-file-if-exists=.env src/scripts/pollPricesOnce.ts",
     "coins:rebuild-latest": "tsx --env-file-if-exists=.env src/scripts/rebuildLatest.ts",
@@ -28,7 +29,8 @@
     "perf:alerts-evaluation": "tsx --env-file-if-exists=.env src/scripts/perf/alertsEvaluationPerf.ts",
     "auth:create-test-user": "tsx --env-file-if-exists=.env src/scripts/createTestUser.ts",
     "auth:token": "tsx --env-file-if-exists=.env src/scripts/authToken.ts",
-    "user:set-role": "tsx --env-file-if-exists=.env src/scripts/setRole.ts"
+    "user:set-role": "tsx --env-file-if-exists=.env src/scripts/setRole.ts",
+    "smoke": "tsx src/scripts/smoke.ts"
   },
   "author": "",
   "license": "ISC",

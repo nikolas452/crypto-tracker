@@ -22,6 +22,11 @@ const baseEnvSchema = z.object({
       'MONGODB_URI must start with mongodb:// or mongodb+srv://',
     ),
   MONGODB_DB_NAME: z.string().min(1, 'MONGODB_DB_NAME must not be empty').default('crypto_tracker'),
+  // Tamaño máximo del pool de conexiones de Mongoose (spec db-connection,
+  // deploy-render tarea 2.1): explícito en vez de depender del default del
+  // driver, para que un deployment no se acerque al límite de conexiones del
+  // cluster (por ejemplo, 500 en un Atlas M0).
+  MONGODB_MAX_POOL_SIZE: z.coerce.number().int().positive().default(10),
   LOG_LEVEL: z.enum(PINO_LEVELS).default('info'),
   SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10000),
 
@@ -156,13 +161,90 @@ const baseEnvSchema = z.object({
   POLL_MAX_JOB_RETRIES: z.coerce.number().int().min(0).default(1),
 });
 
+/**
+ * Variables de Firebase adicionalmente exigidas en producción por
+ * {@link productionValidation} (spec production-config, deploy-render tarea
+ * 2.2) — mismas tres que {@link assertFirebaseCredentials} exige por
+ * entrypoint, pero acá se aplican incondicionalmente al arrancar en
+ * producción, sin la salida del emulador.
+ */
+const PRODUCTION_REQUIRED_FIREBASE_VARIABLES = [
+  'FIREBASE_PROJECT_ID',
+  'FIREBASE_CLIENT_EMAIL',
+  'FIREBASE_PRIVATE_KEY',
+] as const;
+
+/**
+ * Validación adicional aplicada solo cuando `NODE_ENV=production` (spec
+ * production-config, deploy-render tareas 2.2/2.3): exige `TRUST_PROXY` (y
+ * que sea >= 1, ya que la app corre detrás del proxy inverso de la
+ * plataforma) y las tres credenciales de Firebase, y prohíbe
+ * `FIREBASE_AUTH_EMULATOR_HOST`/`FIREBASE_WEB_API_KEY` (variables de solo
+ * desarrollo). Se ejecuta antes del `.transform()` de abajo, así que un
+ * fallo acá impide que `TRUST_PROXY` reciba su default silencioso.
+ */
+type ProductionValidationCtx = Parameters<
+  Parameters<(typeof baseEnvSchema)['superRefine']>[0]
+>[1];
+
+function productionValidation(
+  data: z.infer<typeof baseEnvSchema>,
+  ctx: ProductionValidationCtx,
+): void {
+  if (data.NODE_ENV !== 'production') {
+    return;
+  }
+
+  if (data.TRUST_PROXY === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TRUST_PROXY'],
+      message: 'TRUST_PROXY is required when NODE_ENV=production',
+    });
+  } else if (data.TRUST_PROXY < 1) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TRUST_PROXY'],
+      message: 'TRUST_PROXY must be at least 1 when NODE_ENV=production',
+    });
+  }
+
+  for (const variable of PRODUCTION_REQUIRED_FIREBASE_VARIABLES) {
+    if (!data[variable]) {
+      ctx.addIssue({
+        code: 'custom',
+        path: [variable],
+        message: `${variable} is required when NODE_ENV=production`,
+      });
+    }
+  }
+
+  if (data.FIREBASE_AUTH_EMULATOR_HOST) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['FIREBASE_AUTH_EMULATOR_HOST'],
+      message: 'FIREBASE_AUTH_EMULATOR_HOST must not be set when NODE_ENV=production',
+    });
+  }
+
+  if (data.FIREBASE_WEB_API_KEY) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['FIREBASE_WEB_API_KEY'],
+      message: 'FIREBASE_WEB_API_KEY must not be set when NODE_ENV=production',
+    });
+  }
+}
+
 // El valor por defecto de TRUST_PROXY, dependiente de NODE_ENV, se aplica
 // acá, después de que el objeto base (y por lo tanto NODE_ENV) ya fue
 // validado/resuelto.
-const envSchema = baseEnvSchema.transform((data) => ({
-  ...data,
-  TRUST_PROXY: data.TRUST_PROXY ?? (data.NODE_ENV === 'production' ? 1 : 0),
-}));
+const envSchema = baseEnvSchema
+  .superRefine(productionValidation)
+  .transform((data) => ({
+    ...data,
+    TRUST_PROXY: data.TRUST_PROXY ?? (data.NODE_ENV === 'production' ? 1 : 0),
+  }));
 
 export type Config = Readonly<z.infer<typeof envSchema>>;
 

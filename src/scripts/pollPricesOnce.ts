@@ -42,6 +42,7 @@ async function main(): Promise<void> {
 
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
     isProduction: config.NODE_ENV === 'production',
+    maxPoolSize: config.MONGODB_MAX_POOL_SIZE,
   });
   await ensureCollections(logger);
 

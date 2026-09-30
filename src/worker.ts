@@ -66,6 +66,7 @@ async function main(): Promise<void> {
 
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
     isProduction: config.NODE_ENV === 'production',
+    maxPoolSize: config.MONGODB_MAX_POOL_SIZE,
   });
   // Spec transactional-mongo: falla rápido si la conexión no soporta
   // transacciones, antes de que nada más toque la base de datos.

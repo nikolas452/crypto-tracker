@@ -483,3 +483,19 @@ Authorization: Bearer {{adminIdToken}}
 ### Re-enable it.
 POST {{baseUrl}}/api/v1/admin/jobs/poll-prices/enable
 Authorization: Bearer {{adminIdToken}}
+
+### ============================================================
+### Stage 7 (deploy-render): production diagnostic
+### ============================================================
+
+### Proves `trust proxy` is resolving the caller's real public address rather
+### than the platform's proxy (E7-9) — call this through the deployed API,
+### not localhost, for it to mean anything.
+GET {{baseUrl}}/api/v1/admin/debug/ip
+Authorization: Bearer {{adminIdToken}}
+
+### Authenticated but not an admin -> 403 FORBIDDEN, same guard as every
+### other /api/v1/admin/* route.
+GET {{baseUrl}}/api/v1/admin/debug/ip
+Authorization: Bearer {{idToken}}
+Authorization: Bearer {{adminIdToken}}

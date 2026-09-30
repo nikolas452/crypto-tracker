@@ -43,6 +43,14 @@ function registerLifecycleLogging(logger: Logger): void {
 
 export interface ConnectDbOptions {
   readonly isProduction: boolean;
+  /**
+   * Tamaño máximo del pool de conexiones (spec db-connection, deploy-render
+   * tarea 2.1). Por defecto 10, igual que el default de
+   * `MONGODB_MAX_POOL_SIZE` en `src/config/env.ts` — los callers reales
+   * pasan explícitamente `config.MONGODB_MAX_POOL_SIZE` en lugar de confiar
+   * en este default, que solo cubre callers de test que no lo necesitan.
+   */
+  readonly maxPoolSize?: number;
 }
 
 /**
@@ -70,6 +78,7 @@ export async function connectDb(
       const connection = await mongoose.connect(uri, {
         dbName,
         autoIndex: !options.isProduction,
+        maxPoolSize: options.maxPoolSize ?? 10,
       });
       return connection;
     } catch (error) {
