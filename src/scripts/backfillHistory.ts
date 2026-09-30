@@ -1,100 +1,28 @@
 import { fileURLToPath } from 'node:url';
-import { createInterface } from 'node:readline/promises';
-import type { Types } from 'mongoose';
 import { assertCoinGeckoApiKey, config } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { connectDb, disconnectDb } from '../db/connect.js';
 import { ensureCollections } from '../db/ensureCollections.js';
 import { createCoinGeckoClient } from '../integrations/coingecko/coingecko.client.js';
-import type { MarketChartPoint } from '../integrations/coingecko/coingecko.types.js';
-import { COINGECKO_ID_PATTERN } from '../modules/coins/coins.model.js';
 import { findCoinIdByCoingeckoId } from '../modules/coins/coins.service.js';
 import {
   createSnapshotsRepo,
   getSnapshotTimestamps,
 } from '../modules/snapshots/snapshots.service.js';
 import type { NewSnapshotInput } from '../modules/snapshots/snapshots.service.js';
+import type { BackfillHistorySummary, RunBackfillHistoryDeps } from './support/types.js';
+import {
+  UPSTREAM_CALLS_PER_RUN,
+  confirm,
+  parseBackfillArgs,
+  printBackfillHistorySummary,
+} from './support/utils.js';
 
 /**
  * Script `backfill:history` (11.4/11.5): importa un rango histórico de
  * `market_chart` de CoinGecko para una moneda, insertando solo los puntos
  * cuyo timestamp de upstream todavía no está almacenado.
  */
-
-/**
- * `backfill:history` consume exactamente una llamada a CoinGecko por
- * invocación: `/coins/{id}/market_chart` nunca se fracciona (a diferencia de
- * `/simple/price` o `/coins/markets`, que se agrupan por `maxIdsPerCall`),
- * porque solo acepta un único id de moneda.
- */
-export const UPSTREAM_CALLS_PER_RUN = 1;
-
-export interface BackfillArgs {
-  readonly coingeckoId: string;
-  readonly days: number;
-  readonly skipConfirm: boolean;
-}
-
-/** Parsea `<coingeckoId> --days <n> [--yes|--force]`. Lanza con un mensaje de uso ante una entrada inválida. */
-export function parseArgs(argv: readonly string[]): BackfillArgs {
-  const positional: string[] = [];
-  let daysArg: string | undefined;
-  let skipConfirm = false;
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === '--days') {
-      i += 1;
-      daysArg = argv[i];
-    } else if (arg === '--yes' || arg === '--force') {
-      skipConfirm = true;
-    } else if (arg !== undefined) {
-      positional.push(arg);
-    }
-  }
-
-  const coingeckoId = positional[0]?.trim().toLowerCase();
-  const days = daysArg !== undefined ? Number(daysArg) : NaN;
-
-  if (!coingeckoId || !COINGECKO_ID_PATTERN.test(coingeckoId)) {
-    throw new Error('Usage: npm run backfill:history -- <coingeckoId> --days <n> [--yes|--force]');
-  }
-  if (!Number.isInteger(days) || days <= 0) {
-    throw new Error(
-      '--days must be a positive integer. Usage: npm run backfill:history -- <coingeckoId> --days <n> [--yes|--force]',
-    );
-  }
-
-  return { coingeckoId, days, skipConfirm };
-}
-
-async function confirm(message: string): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = await rl.question(`${message} [y/N] `);
-    return ['y', 'yes'].includes(answer.trim().toLowerCase());
-  } finally {
-    rl.close();
-  }
-}
-
-export interface BackfillHistorySummary {
-  readonly imported: number;
-  readonly skipped: number;
-}
-
-export interface RunBackfillHistoryDeps {
-  readonly coingeckoId: string;
-  readonly coinId: Types.ObjectId;
-  readonly points: readonly MarketChartPoint[];
-  /** Inyectado para que los tests unitarios nunca toquen una base de datos real. */
-  readonly getExistingTimestamps: (
-    coingeckoId: string,
-    from: Date,
-    to: Date,
-  ) => Promise<Set<number>>;
-  readonly insertSnapshots: (docs: readonly NewSnapshotInput[]) => Promise<number>;
-}
 
 /**
  * Lógica pura de importación (11.4/11.5 / spec data-maintenance-scripts): un
@@ -145,14 +73,10 @@ export async function runBackfillHistory(
   return { imported, skipped };
 }
 
-function printSummary(summary: BackfillHistorySummary): void {
-  console.log(`backfill:history summary: imported=${summary.imported} skipped=${summary.skipped}`);
-}
-
 async function main(): Promise<void> {
   assertCoinGeckoApiKey(config, logger);
 
-  const { coingeckoId, days, skipConfirm } = parseArgs(process.argv.slice(2));
+  const { coingeckoId, days, skipConfirm } = parseBackfillArgs(process.argv.slice(2));
 
   console.log(
     `backfill:history will fetch market_chart for "${coingeckoId}" (days=${days}), consuming ${UPSTREAM_CALLS_PER_RUN} CoinGecko API call from the monthly quota.`,
@@ -196,7 +120,7 @@ async function main(): Promise<void> {
     getExistingTimestamps: getSnapshotTimestamps,
     insertSnapshots: (docs) => snapshotsRepo.insertMany(docs),
   });
-  printSummary(summary);
+  printBackfillHistorySummary(summary);
 
   await disconnectDb();
 

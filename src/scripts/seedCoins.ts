@@ -1,55 +1,17 @@
 import { fileURLToPath } from 'node:url';
-import type { Logger } from 'pino';
 import { assertCoinGeckoApiKey, config } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { connectDb, disconnectDb } from '../db/connect.js';
 import { ensureCollections } from '../db/ensureCollections.js';
 import { createCoinGeckoClient } from '../integrations/coingecko/coingecko.client.js';
-import type { CoinGeckoClient } from '../integrations/coingecko/coingecko.types.js';
-import { createCoinsRepo, type CoinsRepo } from '../modules/coins/coins.service.js';
+import { createCoinsRepo } from '../modules/coins/coins.service.js';
+import type { SeedCoinsDeps, SeedSummary } from './support/types.js';
+import { DEFAULT_COIN_IDS, normalizeIds, printSeedCoinsSummary } from './support/utils.js';
 
 /**
  * Script `seed:coins` (RF-1.3): siembra o actualiza el catálogo de monedas a
  * partir de una lista de ids de CoinGecko, usando `/coins/markets`.
  */
-
-/** Lista de monedas por defecto de RF-1.3, usada cuando `seed:coins` corre sin argumentos. */
-export const DEFAULT_COIN_IDS: readonly string[] = [
-  'bitcoin',
-  'ethereum',
-  'solana',
-  'cardano',
-  'ripple',
-  'dogecoin',
-  'polkadot',
-  'chainlink',
-  'litecoin',
-  'avalanche-2',
-];
-
-/** Recorta espacios, pasa a minúsculas y elimina duplicados de los ids, preservando el orden de primera aparición. */
-export function normalizeIds(rawIds: readonly string[]): string[] {
-  const seen = new Set<string>();
-  for (const raw of rawIds) {
-    const normalized = raw.trim().toLowerCase();
-    if (normalized.length > 0) {
-      seen.add(normalized);
-    }
-  }
-  return [...seen];
-}
-
-export interface SeedCoinsDeps {
-  readonly coingecko: Pick<CoinGeckoClient, 'getMarkets'>;
-  readonly coinsRepo: CoinsRepo;
-  readonly logger: Logger;
-}
-
-export interface SeedSummary {
-  readonly created: readonly string[];
-  readonly updated: readonly string[];
-  readonly invalid: readonly string[];
-}
 
 /**
  * Lógica pura de siembra (RF-1.3): normaliza ids, obtiene los markets, hace
@@ -85,16 +47,6 @@ export async function runSeedCoins(
 
   return { created, updated, invalid };
 }
-
-function printSummary(summary: SeedSummary): void {
-  console.log(
-    `seed:coins summary: created=${summary.created.length} updated=${summary.updated.length} invalid=${summary.invalid.length}`,
-  );
-  if (summary.invalid.length > 0) {
-    console.log(`Invalid ids (not returned by CoinGecko): ${summary.invalid.join(', ')}`);
-  }
-}
-
 async function main(): Promise<void> {
   assertCoinGeckoApiKey(config, logger);
 
@@ -117,7 +69,7 @@ async function main(): Promise<void> {
   const coinsRepo = createCoinsRepo();
 
   const summary = await runSeedCoins(ids, { coingecko, coinsRepo, logger });
-  printSummary(summary);
+  printSeedCoinsSummary(summary);
 
   await disconnectDb();
 

@@ -7,6 +7,7 @@ import { ensureCollections } from '../db/ensureCollections.js';
 import { initializeFirebaseAdmin } from '../integrations/firebase/admin.js';
 import { resolveFromIdentity, setUserRoleByEmail } from '../modules/users/users.service.js';
 import type { VerifiedIdentity } from '../integrations/firebase/tokenVerifier.js';
+import { parseCreateTestUserArgs } from './support/utils.js';
 
 /**
  * Script `auth:create-test-user` (spec auth-dev-scripts, tarea 9.1): crea un
@@ -24,45 +25,10 @@ import type { VerifiedIdentity } from '../integrations/firebase/tokenVerifier.js
  * contra un proyecto real.
  */
 
-export interface CreateTestUserArgs {
-  readonly email: string;
-  readonly password: string;
-  readonly admin: boolean;
-}
-
-const USAGE =
-  'Usage: npm run auth:create-test-user -- --email <email> --password <password> [--admin]';
-
-/** Parsea `--email <email> --password <password> [--admin]`. Lanza con un mensaje de uso ante una entrada inválida. */
-export function parseArgs(argv: readonly string[]): CreateTestUserArgs {
-  let email: string | undefined;
-  let password: string | undefined;
-  let admin = false;
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === '--email') {
-      i += 1;
-      email = argv[i];
-    } else if (arg === '--password') {
-      i += 1;
-      password = argv[i];
-    } else if (arg === '--admin') {
-      admin = true;
-    }
-  }
-
-  if (!email || !password) {
-    throw new Error(USAGE);
-  }
-
-  return { email, password, admin };
-}
-
 async function main(): Promise<void> {
   assertNotProduction(config, logger, 'auth:create-test-user');
 
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseCreateTestUserArgs(process.argv.slice(2));
 
   assertFirebaseCredentials(config, logger);
   const app = initializeFirebaseAdmin(config, logger);

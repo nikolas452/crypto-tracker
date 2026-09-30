@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Types } from 'mongoose';
-import { parseArgs, runBackfillHistory } from '../../src/scripts/backfillHistory.js';
+import { runBackfillHistory } from '../../src/scripts/backfillHistory.js';
+import { parseBackfillArgs } from '../../src/scripts/support/utils.js';
 import type { MarketChartPoint } from '../../src/integrations/coingecko/coingecko.types.js';
 
 /** Tests unitarios del script `backfillHistory` de `src/scripts/backfillHistory.ts`. */
@@ -15,9 +16,9 @@ function point(overrides: Partial<MarketChartPoint> = {}): MarketChartPoint {
   };
 }
 
-describe('backfillHistory: parseArgs', () => {
+describe('backfillHistory: parseBackfillArgs', () => {
   it('parses coingeckoId, --days and defaults skipConfirm to false', () => {
-    expect(parseArgs(['bitcoin', '--days', '30'])).toEqual({
+    expect(parseBackfillArgs(['bitcoin', '--days', '30'])).toEqual({
       coingeckoId: 'bitcoin',
       days: 30,
       skipConfirm: false,
@@ -25,27 +26,27 @@ describe('backfillHistory: parseArgs', () => {
   });
 
   it('accepts --yes and --force as skipConfirm', () => {
-    expect(parseArgs(['bitcoin', '--days', '30', '--yes'])).toMatchObject({ skipConfirm: true });
-    expect(parseArgs(['bitcoin', '--days', '30', '--force'])).toMatchObject({ skipConfirm: true });
+    expect(parseBackfillArgs(['bitcoin', '--days', '30', '--yes'])).toMatchObject({ skipConfirm: true });
+    expect(parseBackfillArgs(['bitcoin', '--days', '30', '--force'])).toMatchObject({ skipConfirm: true });
   });
 
   it('lowercases and trims the coingeckoId', () => {
-    expect(parseArgs([' Bitcoin ', '--days', '1'])).toMatchObject({ coingeckoId: 'bitcoin' });
+    expect(parseBackfillArgs([' Bitcoin ', '--days', '1'])).toMatchObject({ coingeckoId: 'bitcoin' });
   });
 
   it('throws when the coingeckoId does not match the allowed pattern', () => {
-    expect(() => parseArgs(['Not Valid!', '--days', '1'])).toThrow(/Usage/);
+    expect(() => parseBackfillArgs(['Not Valid!', '--days', '1'])).toThrow(/Usage/);
   });
 
   it('throws when --days is missing', () => {
-    expect(() => parseArgs(['bitcoin'])).toThrow(/Usage/);
+    expect(() => parseBackfillArgs(['bitcoin'])).toThrow(/Usage/);
   });
 
   it('throws when --days is zero, negative, or not an integer', () => {
-    expect(() => parseArgs(['bitcoin', '--days', '0'])).toThrow();
-    expect(() => parseArgs(['bitcoin', '--days', '-5'])).toThrow();
-    expect(() => parseArgs(['bitcoin', '--days', '1.5'])).toThrow();
-    expect(() => parseArgs(['bitcoin', '--days', 'abc'])).toThrow();
+    expect(() => parseBackfillArgs(['bitcoin', '--days', '0'])).toThrow();
+    expect(() => parseBackfillArgs(['bitcoin', '--days', '-5'])).toThrow();
+    expect(() => parseBackfillArgs(['bitcoin', '--days', '1.5'])).toThrow();
+    expect(() => parseBackfillArgs(['bitcoin', '--days', 'abc'])).toThrow();
   });
 });
 

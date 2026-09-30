@@ -8,6 +8,7 @@ import { connectDb, disconnectDb } from '../../db/connect.js';
 import { ensureCollections } from '../../db/ensureCollections.js';
 import { AlertModel } from '../../modules/alerts/alerts.model.js';
 import { evaluateAlerts, type CoinInfoEntry, type CoinValueEntry } from '../../jobs/alertEvaluation.js';
+import { ALERTS_COIN_COUNT, ALERTS_PER_COIN, TARGET_MS, TOTAL_ALERTS } from '../support/utils.js';
 
 /**
  * `npm run perf:alerts-evaluation` (tarea 12.6 / RNF-5.1): siembra 1.000
@@ -24,11 +25,6 @@ import { evaluateAlerts, type CoinInfoEntry, type CoinValueEntry } from '../../j
  * real (tarea 12.6).
  */
 
-const COIN_COUNT = 10;
-const ALERTS_PER_COIN = 100;
-const TOTAL_ALERTS = COIN_COUNT * ALERTS_PER_COIN;
-const TARGET_MS = 2000;
-
 async function seed(): Promise<{
   coinValueMap: Map<string, CoinValueEntry>;
   coinInfoMap: Map<string, CoinInfoEntry>;
@@ -37,7 +33,7 @@ async function seed(): Promise<{
   const coinInfoMap = new Map<string, CoinInfoEntry>();
   const userId = new Types.ObjectId();
 
-  for (let c = 0; c < COIN_COUNT; c += 1) {
+  for (let c = 0; c < ALERTS_COIN_COUNT; c += 1) {
     const coinId = new Types.ObjectId();
     const coingeckoId = `perf-alert-coin-${c}`;
 
@@ -67,7 +63,7 @@ async function seed(): Promise<{
 }
 
 async function main(): Promise<void> {
-  console.log(`Seeding ${TOTAL_ALERTS} alerts across ${COIN_COUNT} coins...`);
+  console.log(`Seeding ${TOTAL_ALERTS} alerts across ${ALERTS_COIN_COUNT} coins...`);
 
   const replSet = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
   await replSet.waitUntilRunning();
@@ -98,7 +94,7 @@ async function main(): Promise<void> {
     const verdict = durationMs < TARGET_MS ? 'PASS' : 'FAIL';
     console.log('\nRNF-5.1 results:');
     console.log(
-      `  evaluateAlerts (${stats.alertsEvaluated} alerts, ${COIN_COUNT} coins, nothing triggers): ` +
+      `  evaluateAlerts (${stats.alertsEvaluated} alerts, ${ALERTS_COIN_COUNT} coins, nothing triggers): ` +
         `${durationMs.toFixed(2)}ms (target: < ${TARGET_MS}ms) [${verdict}]`,
     );
     console.log(

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exitCodeFor } from '../../src/scripts/pollPricesOnce.js';
+import { exitCodeFor } from '../../src/scripts/support/utils.js';
 
 /** Test unitario del mapeo de estado a código de salida del script `job:poll-prices`. */
 

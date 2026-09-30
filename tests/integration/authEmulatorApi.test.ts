@@ -6,7 +6,7 @@ import { createApp } from '../../src/app.js';
 import { config } from '../../src/config/env.js';
 import { initializeFirebaseAdmin } from '../../src/integrations/firebase/admin.js';
 import { createFirebaseTokenVerifier } from '../../src/integrations/firebase/tokenVerifier.js';
-import { buildSignInUrl, signInWithPassword } from '../../src/scripts/authToken.js';
+import { buildSignInUrl, signInWithPassword } from '../../src/scripts/support/utils.js';
 import { ensureCollections } from '../../src/db/ensureCollections.js';
 import { startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
 

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Logger } from 'pino';
-import { runSeedCoins, normalizeIds, DEFAULT_COIN_IDS } from '../../src/scripts/seedCoins.js';
+import { runSeedCoins } from '../../src/scripts/seedCoins.js';
+import { normalizeIds, DEFAULT_COIN_IDS } from '../../src/scripts/support/utils.js';
 import { createCoinsRepo } from '../../src/modules/coins/coins.service.js';
 import { CoinModel } from '../../src/modules/coins/coins.model.js';
 import type { MarketCoin } from '../../src/integrations/coingecko/coingecko.types.js';

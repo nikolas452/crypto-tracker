@@ -9,6 +9,19 @@ import { ensureCollections } from '../../db/ensureCollections.js';
 import { createApp } from '../../app.js';
 import { CoinModel } from '../../modules/coins/coins.model.js';
 import { PriceSnapshotModel } from '../../modules/snapshots/snapshots.model.js';
+import type { SnapshotSeed } from '../support/types.js';
+import {
+  COINS_LIST_COIN_COUNT,
+  INSERT_BATCH_SIZE,
+  MEASURED_REQUESTS,
+  POINTS_PER_COIN,
+  POLL_INTERVAL_MIN,
+  HISTORY_DAYS,
+  WARMUP_REQUESTS,
+  computeStats,
+  formatRow,
+  timeRequests,
+} from '../support/utils.js';
 
 /**
  * `npm run perf:coins-list` (12.4 / Definition of Done): siembra un dataset
@@ -35,63 +48,12 @@ import { PriceSnapshotModel } from '../../modules/snapshots/snapshots.model.js';
  * produjo una corrida real.
  */
 
-const COIN_COUNT = 10;
-const HISTORY_DAYS = 90;
-const POLL_INTERVAL_MIN = 10;
-const POINTS_PER_COIN = Math.floor((HISTORY_DAYS * 24 * 60) / POLL_INTERVAL_MIN); // ≈ 12.960, coincide con el "≈ 13.000 puntos por moneda" de RNF-2.1
-const INSERT_BATCH_SIZE = 5000;
-const WARMUP_REQUESTS = 10;
-const MEASURED_REQUESTS = 100;
-
-interface LatencyStats {
-  readonly p50: number;
-  readonly p95: number;
-  readonly p99: number;
-  readonly max: number;
-}
-
-function percentile(sortedMs: readonly number[], p: number): number {
-  if (sortedMs.length === 0) return 0;
-  const index = Math.min(sortedMs.length - 1, Math.floor(p * sortedMs.length));
-  return sortedMs[index] ?? 0;
-}
-
-function computeStats(samplesMs: readonly number[]): LatencyStats {
-  const sorted = [...samplesMs].sort((a, b) => a - b);
-  return {
-    p50: percentile(sorted, 0.5),
-    p95: percentile(sorted, 0.95),
-    p99: percentile(sorted, 0.99),
-    max: sorted[sorted.length - 1] ?? 0,
-  };
-}
-
-async function timeRequests(run: () => Promise<unknown>, count: number): Promise<number[]> {
-  const samples: number[] = [];
-  for (let i = 0; i < count; i += 1) {
-    const start = performance.now();
-    await run();
-    samples.push(performance.now() - start);
-  }
-  return samples;
-}
-
-interface SnapshotSeed {
-  readonly timestamp: Date;
-  readonly meta: { readonly coinId: unknown; readonly coingeckoId: string };
-  readonly priceUsd: number;
-  readonly marketCapUsd: number;
-  readonly volume24hUsd: number;
-  readonly change24hPct: null;
-  readonly sourceUpdatedAt: Date;
-}
-
-/** Siembra `COIN_COUNT` monedas, cada una con `POINTS_PER_COIN` snapshots espaciados por `POLL_INTERVAL_MIN`, terminando cerca de "ahora". */
+/** Siembra `COINS_LIST_COIN_COUNT` monedas, cada una con `POINTS_PER_COIN` snapshots espaciados por `POLL_INTERVAL_MIN`, terminando cerca de "ahora". */
 async function seed(): Promise<{ coingeckoIds: string[] }> {
   const coingeckoIds: string[] = [];
   const now = new Date();
 
-  for (let c = 0; c < COIN_COUNT; c += 1) {
+  for (let c = 0; c < COINS_LIST_COIN_COUNT; c += 1) {
     const coingeckoId = `perf-coin-${c}`;
     coingeckoIds.push(coingeckoId);
 
@@ -152,19 +114,9 @@ async function seed(): Promise<{ coingeckoIds: string[] }> {
 
   return { coingeckoIds };
 }
-
-function formatRow(name: string, stats: LatencyStats, targetP95Ms: number): string {
-  const verdict = stats.p95 < targetP95Ms ? 'PASS' : 'FAIL';
-  return (
-    `${name}: p50=${stats.p50.toFixed(2)}ms p95=${stats.p95.toFixed(2)}ms ` +
-    `p99=${stats.p99.toFixed(2)}ms max=${stats.max.toFixed(2)}ms ` +
-    `(RNF-2.1 target: p95 < ${targetP95Ms}ms) [${verdict}]`
-  );
-}
-
 async function main(): Promise<void> {
   console.log(
-    `Seeding ${COIN_COUNT} coins x ~${POINTS_PER_COIN} points each ` +
+    `Seeding ${COINS_LIST_COIN_COUNT} coins x ~${POINTS_PER_COIN} points each ` +
       `(${HISTORY_DAYS} days @ every ${POLL_INTERVAL_MIN}min)...`,
   );
 
@@ -220,17 +172,18 @@ async function main(): Promise<void> {
     );
 
     console.log('\nRNF-2.1 results:');
-    console.log('  ' + formatRow('GET /api/v1/coins', computeStats(coinsListSamples), 50));
+    console.log('  ' + formatRow('GET /api/v1/coins', computeStats(coinsListSamples), 50, 'RNF-2.1'));
     console.log(
       '  ' +
         formatRow(
           'GET /api/v1/coins/:id/history?interval=1h (30d)',
           computeStats(historySamples),
           200,
+          'RNF-2.1',
         ),
     );
     console.log(
-      '  ' + formatRow('GET /api/v1/coins/:id/stats?range=90d', computeStats(statsSamples), 200),
+      '  ' + formatRow('GET /api/v1/coins/:id/stats?range=90d', computeStats(statsSamples), 200, 'RNF-2.1'),
     );
   } finally {
     await disconnectDb();

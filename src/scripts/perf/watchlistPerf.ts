@@ -11,6 +11,16 @@ import { CoinModel } from '../../modules/coins/coins.model.js';
 import { UserModel } from '../../modules/users/users.model.js';
 import { WatchlistItemModel } from '../../modules/watchlist/watchlist.model.js';
 import { createFakeTokenVerifier } from '../../integrations/firebase/fakeTokenVerifier.js';
+import {
+  MEASURED_REQUESTS,
+  WARMUP_REQUESTS,
+  WATCHLIST_IDENTITY,
+  WATCHLIST_ITEM_COUNT,
+  WATCHLIST_TOKEN,
+  computeStats,
+  formatRow,
+  timeRequests,
+} from '../support/utils.js';
 
 /**
  * `npm run perf:watchlist` (tarea 8.4 / RNF-4.1): siembra un usuario con
@@ -24,72 +34,18 @@ import { createFakeTokenVerifier } from '../../integrations/firebase/fakeTokenVe
  * corrida real.
  */
 
-const ITEM_COUNT = 50;
-const WARMUP_REQUESTS = 10;
-const MEASURED_REQUESTS = 100;
-
-interface LatencyStats {
-  readonly p50: number;
-  readonly p95: number;
-  readonly p99: number;
-  readonly max: number;
-}
-
-function percentile(sortedMs: readonly number[], p: number): number {
-  if (sortedMs.length === 0) return 0;
-  const index = Math.min(sortedMs.length - 1, Math.floor(p * sortedMs.length));
-  return sortedMs[index] ?? 0;
-}
-
-function computeStats(samplesMs: readonly number[]): LatencyStats {
-  const sorted = [...samplesMs].sort((a, b) => a - b);
-  return {
-    p50: percentile(sorted, 0.5),
-    p95: percentile(sorted, 0.95),
-    p99: percentile(sorted, 0.99),
-    max: sorted[sorted.length - 1] ?? 0,
-  };
-}
-
-async function timeRequests(run: () => Promise<unknown>, count: number): Promise<number[]> {
-  const samples: number[] = [];
-  for (let i = 0; i < count; i += 1) {
-    const start = performance.now();
-    await run();
-    samples.push(performance.now() - start);
-  }
-  return samples;
-}
-
-function formatRow(name: string, stats: LatencyStats, targetP95Ms: number): string {
-  const verdict = stats.p95 < targetP95Ms ? 'PASS' : 'FAIL';
-  return (
-    `${name}: p50=${stats.p50.toFixed(2)}ms p95=${stats.p95.toFixed(2)}ms ` +
-    `p99=${stats.p99.toFixed(2)}ms max=${stats.max.toFixed(2)}ms ` +
-    `(RNF-4.1 target: p95 < ${targetP95Ms}ms) [${verdict}]`
-  );
-}
-
-const TOKEN = 'perf-watchlist-token';
-const IDENTITY = {
-  uid: 'perf-watchlist-uid',
-  email: 'perf@example.com',
-  emailVerified: true,
-  name: null,
-};
-
-/** Crea `ITEM_COUNT` monedas activas con `latest` y las agrega todas a la watchlist del usuario de perf. */
+/** Crea `WATCHLIST_ITEM_COUNT` monedas activas con `latest` y las agrega todas a la watchlist del usuario de perf. */
 async function seed(): Promise<void> {
   const user = await UserModel.create({
-    firebaseUid: IDENTITY.uid,
-    email: IDENTITY.email,
+    firebaseUid: WATCHLIST_IDENTITY.uid,
+    email: WATCHLIST_IDENTITY.email,
     emailVerified: true,
     displayName: null,
     role: 'user',
     lastSeenAt: new Date(),
   });
 
-  for (let i = 0; i < ITEM_COUNT; i += 1) {
+  for (let i = 0; i < WATCHLIST_ITEM_COUNT; i += 1) {
     const coingeckoId = `perf-watchlist-coin-${i}`;
     const coin = await CoinModel.create({
       coingeckoId,
@@ -109,7 +65,7 @@ async function seed(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log(`Seeding one user with ${ITEM_COUNT} watchlist items...`);
+  console.log(`Seeding one user with ${WATCHLIST_ITEM_COUNT} watchlist items...`);
 
   const mongod = await MongoMemoryServer.create();
 
@@ -124,11 +80,11 @@ async function main(): Promise<void> {
     const app = createApp({
       logger: pino({ level: 'silent' }),
       rateLimitConfig: { RATE_LIMIT_MAX: 1_000_000, RATE_LIMIT_WINDOW_MIN: 15 },
-      tokenVerifier: createFakeTokenVerifier({ identities: { [TOKEN]: IDENTITY } }),
+      tokenVerifier: createFakeTokenVerifier({ identities: { [WATCHLIST_TOKEN]: WATCHLIST_IDENTITY } }),
     });
 
     const doRequest = () =>
-      request(app).get('/api/v1/me/watchlist').set('Authorization', `Bearer ${TOKEN}`);
+      request(app).get('/api/v1/me/watchlist').set('Authorization', `Bearer ${WATCHLIST_TOKEN}`);
 
     // Warm-up: excluido de las muestras medidas.
     await timeRequests(doRequest, WARMUP_REQUESTS);
@@ -137,7 +93,7 @@ async function main(): Promise<void> {
     const samples = await timeRequests(doRequest, MEASURED_REQUESTS);
 
     console.log('\nRNF-4.1 results:');
-    console.log('  ' + formatRow('GET /api/v1/me/watchlist (50 items)', computeStats(samples), 50));
+    console.log('  ' + formatRow('GET /api/v1/me/watchlist (50 items)', computeStats(samples), 50, 'RNF-4.1'));
   } finally {
     await disconnectDb();
     await mongod.stop();

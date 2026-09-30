@@ -3,8 +3,8 @@ import { config } from '../config/env.js';
 import { logger } from '../lib/logger.js';
 import { connectDb, disconnectDb } from '../db/connect.js';
 import { ensureCollections } from '../db/ensureCollections.js';
-import { USER_ROLES, type UserRole } from '../modules/users/users.model.js';
 import { setUserRoleByEmail } from '../modules/users/users.service.js';
+import { parseSetRoleArgs } from './support/utils.js';
 
 /**
  * Script `user:set-role` (spec auth-dev-scripts, tarea 9.3): busca el perfil
@@ -14,43 +14,8 @@ import { setUserRoleByEmail } from '../modules/users/users.service.js';
  * forma de promover al primer admin — ver design.md, "Migration Plan"), así
  * que deliberadamente NO usa `assertNotProduction`.
  */
-
-export interface SetRoleArgs {
-  readonly email: string;
-  readonly role: UserRole;
-}
-
-const USAGE = `Usage: npm run user:set-role -- --email <email> --role <${USER_ROLES.join('|')}>`;
-
-function isUserRole(value: string): value is UserRole {
-  return (USER_ROLES as readonly string[]).includes(value);
-}
-
-/** Parsea `--email <email> --role <role>`. Lanza con un mensaje de uso ante una entrada inválida. */
-export function parseArgs(argv: readonly string[]): SetRoleArgs {
-  let email: string | undefined;
-  let role: string | undefined;
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg === '--email') {
-      i += 1;
-      email = argv[i];
-    } else if (arg === '--role') {
-      i += 1;
-      role = argv[i];
-    }
-  }
-
-  if (!email || !role || !isUserRole(role)) {
-    throw new Error(USAGE);
-  }
-
-  return { email, role };
-}
-
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const args = parseSetRoleArgs(process.argv.slice(2));
 
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
     isProduction: config.NODE_ENV === 'production',

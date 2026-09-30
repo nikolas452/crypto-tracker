@@ -10,7 +10,8 @@ import { createCoinGeckoClient } from '../integrations/coingecko/coingecko.clien
 import { createCoinsRepo } from '../modules/coins/coins.service.js';
 import { createSnapshotsRepo } from '../modules/snapshots/snapshots.service.js';
 import { createJobRunsRepo } from '../modules/job-runs/job-runs.service.js';
-import { createPollPricesJob, JOB_NAME, type JobRunResult } from '../jobs/pollPrices.js';
+import { createPollPricesJob, JOB_NAME } from '../jobs/pollPrices.js';
+import { exitCodeFor, printPollPricesResult } from './support/utils.js';
 
 /**
  * `npm run job:poll-prices` (RF-1.8): ejecuta el job `poll-prices` exactamente
@@ -23,19 +24,6 @@ import { createPollPricesJob, JOB_NAME, type JobRunResult } from '../jobs/pollPr
  * CoinGecko — resolviendo la limitación documentada en la etapa 1 (un run
  * manual podía solapar con el del worker).
  */
-export function exitCodeFor(status: JobRunResult['status']): 0 | 1 {
-  return status === 'failed' ? 1 : 0;
-}
-
-function printResult(result: JobRunResult): void {
-  console.log(
-    `job:poll-prices result: status=${result.status}${result.skipReason ? ` skipReason=${result.skipReason}` : ''} durationMs=${result.durationMs}`,
-  );
-  console.log(`stats: ${JSON.stringify(result.stats)}`);
-  if (result.error) {
-    console.log(`error: ${result.error.code} - ${result.error.message}`);
-  }
-}
 
 async function main(): Promise<void> {
   assertCoinGeckoApiKey(config, logger);
@@ -87,7 +75,7 @@ async function main(): Promise<void> {
     });
 
     const result = await job.run('manual');
-    printResult(result);
+    printPollPricesResult(result);
 
     process.exitCode = exitCodeFor(result.status);
   } finally {

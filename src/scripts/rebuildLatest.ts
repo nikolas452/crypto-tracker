@@ -9,13 +9,8 @@ import {
   type LatestRefreshInput,
 } from '../modules/coins/coins.service.js';
 import { getLatestSnapshotsByCoin } from '../modules/snapshots/snapshots.service.js';
-
-export interface RebuildLatestSummary {
-  /** Cantidad de monedas cuyo `latest` fue efectivamente sobrescrito. */
-  readonly updated: number;
-  /** Monedas sin ningún documento de `price_snapshots` — se reportan, no se consideran un fallo. */
-  readonly noSnapshots: readonly string[];
-}
+import type { RebuildLatestSummary } from './support/types.js';
+import { printRebuildLatestSummary } from './support/utils.js';
 
 /**
  * `npm run coins:rebuild-latest` (11.1 / spec data-maintenance-scripts): para
@@ -60,16 +55,6 @@ export async function runRebuildLatest(): Promise<RebuildLatestSummary> {
 
   return { updated: result.modifiedCount, noSnapshots };
 }
-
-function printSummary(summary: RebuildLatestSummary): void {
-  console.log(
-    `coins:rebuild-latest summary: updated=${summary.updated} noSnapshots=${summary.noSnapshots.length}`,
-  );
-  if (summary.noSnapshots.length > 0) {
-    console.log(`Coins with no snapshots: ${summary.noSnapshots.join(', ')}`);
-  }
-}
-
 async function main(): Promise<void> {
   await connectDb(config.MONGODB_URI, config.MONGODB_DB_NAME, logger, {
     isProduction: config.NODE_ENV === 'production',
@@ -77,7 +62,7 @@ async function main(): Promise<void> {
   await ensureCollections(logger);
 
   const summary = await runRebuildLatest();
-  printSummary(summary);
+  printRebuildLatestSummary(summary);
 
   await disconnectDb();
 
