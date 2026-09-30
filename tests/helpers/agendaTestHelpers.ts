@@ -14,6 +14,47 @@ import type { Agenda } from 'agenda';
  * ocasionalmente competía con esa contención de CPU/IO en observaciones
  * reales.
  */
+/**
+ * Variante multi-instancia: resuelve cuando entre todas las instancias dadas se
+ * acumularon `count` eventos `complete:<name>`/`fail:<name>`. Sirve cuando cada
+ * `now()` crea un job distinto y no se puede saber qué instancia lo toma.
+ */
+export function waitForJobCount(
+  agendas: Agenda[],
+  name: string,
+  count: number,
+  timeoutMs = 10000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let seen = 0;
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timed out waiting for ${count} runs of ${name} (saw ${seen})`));
+    }, timeoutMs);
+
+    function onDone(): void {
+      seen += 1;
+      if (seen >= count) {
+        cleanup();
+        resolve();
+      }
+    }
+
+    function cleanup(): void {
+      clearTimeout(timer);
+      for (const agenda of agendas) {
+        agenda.off(`complete:${name}`, onDone);
+        agenda.off(`fail:${name}`, onDone);
+      }
+    }
+
+    for (const agenda of agendas) {
+      agenda.on(`complete:${name}`, onDone);
+      agenda.on(`fail:${name}`, onDone);
+    }
+  });
+}
+
 export function waitForJob(agenda: Agenda, name: string, timeoutMs = 10000): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {

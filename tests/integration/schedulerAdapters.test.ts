@@ -14,7 +14,7 @@ import { acquire } from '../../src/lib/lease-lock.js';
 import { createPollPricesAdapter } from '../../src/scheduler/adapters.js';
 import { createAgenda, JOB_NAMES } from '../../src/scheduler/agenda.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
-import { waitForJob } from '../helpers/agendaTestHelpers.js';
+import { waitForJobCount } from '../helpers/agendaTestHelpers.js';
 import type { SimplePrice } from '../../src/integrations/coingecko/coingecko.types.js';
 
 const silentLogger = pino({ level: 'silent' });
@@ -207,8 +207,10 @@ describe('poll-prices adapter (integration)', () => {
       await Promise.all([
         agendaA.now(JOB_NAMES.POLL_PRICES),
         agendaB.now(JOB_NAMES.POLL_PRICES),
-        waitForJob(agendaA, JOB_NAMES.POLL_PRICES, 10000),
-        waitForJob(agendaB, JOB_NAMES.POLL_PRICES, 10000),
+        // Cada `now()` crea un job propio y cualquiera de las dos instancias
+        // puede tomarlos: se espera a que terminen 2 corridas en total, no una
+        // por instancia.
+        waitForJobCount([agendaA, agendaB], JOB_NAMES.POLL_PRICES, 2, 10000),
       ]);
     } finally {
       await Promise.all([agendaA.stop(), agendaB.stop()]);
