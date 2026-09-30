@@ -1,170 +1,107 @@
 import pino from 'pino';
 import type { Logger } from 'pino';
 import { z } from 'zod';
+import { CONSTANTS } from './constants.js';
+import type { LogLevel, NodeEnv } from './constants.js';
 
 /**
  * `src/config/env.ts` es el ÚNICO módulo en `src/` autorizado a leer
  * `process.env` (impuesto por la regla de ESLint `no-restricted-properties`).
  * Todo otro módulo debe importar el objeto `config` congelado exportado más
  * abajo.
+ *
+ * Los valores no sensibles viven en `src/config/constants.ts`; acá solo se
+ * validan los secretos y los overrides opcionales de despliegue, y se combinan
+ * con esas constantes para armar `config`. Este archivo no define defaults
+ * propios.
  */
 
 const PINO_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const;
 
-const baseEnvSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  MONGODB_URI: z
-    .string()
-    .min(1, 'MONGODB_URI is required')
-    .refine(
-      (value) => value.startsWith('mongodb://') || value.startsWith('mongodb+srv://'),
-      'MONGODB_URI must start with mongodb:// or mongodb+srv://',
-    ),
-  MONGODB_DB_NAME: z.string().min(1, 'MONGODB_DB_NAME must not be empty').default('crypto_tracker'),
-  LOG_LEVEL: z.enum(PINO_LEVELS).default('info'),
-  SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10000),
+const envSchema = z
+  .object({
+    // --- secretos (siempre vienen de .env) ---
+    MONGODB_URI: z
+      .string()
+      .min(1, 'MONGODB_URI is required')
+      .refine(
+        (value) => value.startsWith('mongodb://') || value.startsWith('mongodb+srv://'),
+        'MONGODB_URI must start with mongodb:// or mongodb+srv://',
+      ),
+    // Opcional a nivel de schema (aunque, desde watchlists, TODO entrypoint la
+    // exige en la práctica) para que `parseEnv` siga siendo testeable sin ella
+    // y para reutilizar el mismo mecanismo de guarda de fallo rápido. Los
+    // entrypoints que la necesitan (worker, script de seed, script de
+    // ejecución manual, y ahora también la API — RF-4.8: los endpoints de
+    // administración de monedas llaman a CoinGecko) llaman a
+    // `assertCoinGeckoApiKey()` justo después de cargar la config para fallar
+    // rápido.
+    COINGECKO_API_KEY: z.string().min(1).optional(),
+    // Las tres variables de la cuenta de servicio de Firebase son opcionales a
+    // nivel de schema (igual que COINGECKO_API_KEY) para que el proceso pueda
+    // arrancar sin ellas cuando se usa el emulador de Auth;
+    // `assertFirebaseCredentials()` exige las tres salvo que
+    // FIREBASE_AUTH_EMULATOR_HOST esté configurado.
+    FIREBASE_PROJECT_ID: z.string().min(1).optional(),
+    FIREBASE_CLIENT_EMAIL: z.string().min(1).optional(),
+    FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
+    // Solo la usan los scripts de desarrollo (auth:token) para llamar al REST
+    // API de Identity Toolkit; el proceso de la API nunca la necesita.
+    FIREBASE_WEB_API_KEY: z.string().min(1).optional(),
+    // Mailpit local no requiere autenticación, por eso quedan opcionales.
+    SMTP_USER: z.string().min(1).optional(),
+    SMTP_PASS: z.string().min(1).optional(),
 
-  // --- primer-job: cliente de CoinGecko ---
-  // Opcional a nivel de schema (aunque, desde watchlists, TODO entrypoint la
-  // exige en la práctica) para que `parseEnv` siga siendo testeable sin ella
-  // y para reutilizar el mismo mecanismo de guarda de fallo rápido. Los
-  // entrypoints que la necesitan (worker, script de seed, script de
-  // ejecución manual, y ahora también la API — RF-4.8: los endpoints de
-  // administración de monedas llaman a CoinGecko) llaman a
-  // `assertCoinGeckoApiKey()` justo después de cargar la config para fallar
-  // rápido.
-  COINGECKO_API_KEY: z.string().min(1).optional(),
-  COINGECKO_BASE_URL: z.string().min(1).default('https://api.coingecko.com/api/v3'),
-  COINGECKO_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
-  COINGECKO_MAX_RETRIES: z.coerce.number().int().min(0).max(5).default(2),
-  COINGECKO_MAX_IDS_PER_CALL: z.coerce.number().int().min(1).max(250).default(50),
-  // Chequeo de disponibilidad opcional `coingecko` de `/health/ready`
-  // (spec health-checks / RF-4.8), deshabilitado por defecto: si CoinGecko
-  // se cae, la API no debería salir de rotación en el balanceador — el
-  // chequeo existe solo para diagnóstico manual.
-  COINGECKO_READINESS_ENABLED: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((value) => value === 'true'),
+    // --- overrides opcionales de despliegue (el default está en CONSTANTS) ---
+    NODE_ENV: z.enum(['development', 'test', 'production']).optional(),
+    PORT: z.coerce.number().int().min(1).max(65535).optional(),
+    LOG_LEVEL: z.enum(PINO_LEVELS).optional(),
+    SMTP_HOST: z.string().min(1).optional(),
+    SMTP_PORT: z.coerce.number().int().min(1).max(65535).optional(),
+    MAIL_FROM: z.string().min(1).optional(),
+    // Host:puerto del emulador local de Firebase Auth (por ejemplo
+    // 127.0.0.1:9099). Solo para desarrollo — ver assertFirebaseCredentials()
+    // y el guard de producción en src/integrations/firebase/admin.ts. Sin
+    // default: su ausencia significa "no usar emulador".
+    FIREBASE_AUTH_EMULATOR_HOST: z.string().min(1).optional(),
+    // Cantidad de saltos de proxy reverso en los que confiar (Express "trust
+    // proxy"). Su default (0 fuera de producción, 1 en producción) depende de
+    // NODE_ENV, por eso se resuelve en `parseEnv`, no acá.
+    TRUST_PROXY: z.coerce.number().int().min(0).optional(),
+  });
 
-  // --- primer-job: job y worker de poll-prices ---
-  POLL_PRICES_CRON: z.string().min(1).default('*/10 * * * *'),
-  POLL_PRICES_RUN_ON_START: z
-    .enum(['true', 'false'])
-    .default('true')
-    .transform((value) => value === 'true'),
-  // Un string vacío significa "sin expiración"; si no está definida, cae al
-  // valor por defecto de 90 días. Una vez resuelto, `null` significa sin
-  // expiración.
-  SNAPSHOT_RETENTION_DAYS: z.preprocess(
-    (value) => {
-      if (value === undefined) return 90;
-      if (typeof value === 'string' && value.trim() === '') return null;
-      return value;
-    },
-    z.union([z.coerce.number().int().positive(), z.null()]),
-  ),
-  JOB_RUNS_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
-  STALE_RUN_THRESHOLD_MIN: z.coerce.number().int().positive().default(15),
-  WORKER_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
+/** Ensancha los literales de `as const` (3000 -> number, 'x' -> string, false -> boolean). */
+type Widen<T> = {
+  -readonly [K in keyof T]: T[K] extends number
+    ? number
+    : T[K] extends boolean
+      ? boolean
+      : T[K] extends string
+        ? string
+        : T[K];
+};
 
-  // --- api-rest: rate limiting, confianza en el proxy, superficie de admin ---
-  // TRUST_PROXY no tiene valor por defecto a nivel de schema: su default (0
-  // en desarrollo, 1 en producción) depende de NODE_ENV, que no se conoce
-  // hasta que se parsea el objeto completo — se resuelve más abajo vía
-  // `.transform()` sobre el schema completo.
-  TRUST_PROXY: z.coerce.number().int().min(0).optional(),
-  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(300),
-  RATE_LIMIT_WINDOW_MIN: z.coerce.number().int().positive().default(15),
-  STALE_POLL_THRESHOLD_MIN: z.coerce.number().int().positive().default(30),
+type ValidatedEnv = z.infer<typeof envSchema>;
 
-  // --- auth-firebase: Firebase Admin, verificación de tokens y perfiles de usuario ---
-  // Las tres variables de la cuenta de servicio son opcionales a nivel de
-  // schema (igual que COINGECKO_API_KEY) para que el proceso pueda arrancar
-  // sin ellas cuando se usa el emulador de Auth; `assertFirebaseCredentials()`
-  // exige las tres salvo que FIREBASE_AUTH_EMULATOR_HOST esté configurado.
-  FIREBASE_PROJECT_ID: z.string().min(1).optional(),
-  FIREBASE_CLIENT_EMAIL: z.string().min(1).optional(),
-  FIREBASE_PRIVATE_KEY: z.string().min(1).optional(),
-  // Solo la usan los scripts de desarrollo (auth:token) para llamar al REST
-  // API de Identity Toolkit; el proceso de la API nunca la necesita.
-  FIREBASE_WEB_API_KEY: z.string().min(1).optional(),
-  // Host:puerto del emulador local de Firebase Auth (por ejemplo
-  // 127.0.0.1:9099). Solo para desarrollo — ver assertFirebaseCredentials()
-  // y el guard de producción en src/integrations/firebase/admin.ts.
-  FIREBASE_AUTH_EMULATOR_HOST: z.string().min(1).optional(),
-  // Límite de requests por minuto por uid autenticado (limitador de tasa
-  // por usuario, además del límite global por IP). Default 120.
-  USER_RATE_LIMIT_PER_MIN: z.coerce.number().int().positive().default(120),
-  // Minutos de antigüedad de `lastSeenAt` antes de refrescarlo en un request
-  // autenticado (spec user-profile). Default 5.
-  LAST_SEEN_THROTTLE_MIN: z.coerce.number().int().positive().default(5),
+export type Config = Readonly<
+  Widen<Omit<typeof CONSTANTS, 'NODE_ENV' | 'LOG_LEVEL'>> & {
+    NODE_ENV: NodeEnv;
+    LOG_LEVEL: LogLevel;
+    TRUST_PROXY: number;
+    FIREBASE_AUTH_EMULATOR_HOST?: string;
+  } & Pick<
+      ValidatedEnv,
+      | 'MONGODB_URI'
+      | 'COINGECKO_API_KEY'
+      | 'FIREBASE_PROJECT_ID'
+      | 'FIREBASE_CLIENT_EMAIL'
+      | 'FIREBASE_PRIVATE_KEY'
+      | 'FIREBASE_WEB_API_KEY'
+      | 'SMTP_USER'
+      | 'SMTP_PASS'
+    >
+>;
 
-  // --- watchlists: límite de ítems por usuario (spec watchlist-store) ---
-  WATCHLIST_MAX_ITEMS: z.coerce.number().int().positive().default(50),
-
-  // --- alertas-email: SMTP, plantilla de correo y jobs de alertas/notificaciones ---
-  // SMTP_HOST y MAIL_FROM son opcionales a nivel de schema (mismo motivo que
-  // las credenciales de Firebase) para que `parseEnv` siga siendo testeable
-  // sin ellas; `assertSmtpCredentials()` las exige en el worker, que es el
-  // único entrypoint que efectivamente envía correo.
-  SMTP_HOST: z.string().min(1).optional(),
-  SMTP_PORT: z.coerce.number().int().min(1).max(65535).default(587),
-  // Mailpit local no requiere autenticación, por eso quedan opcionales.
-  SMTP_USER: z.string().min(1).optional(),
-  SMTP_PASS: z.string().min(1).optional(),
-  MAIL_FROM: z.string().min(1).optional(),
-  // Zona horaria de referencia mostrada en el cuerpo del email (spec
-  // email-templates), separada de la marca de tiempo UTC que siempre se
-  // incluye también.
-  MAIL_DISPLAY_TIMEZONE: z.string().min(1).default('America/Argentina/Buenos_Aires'),
-  MAIL_MAX_PER_MINUTE: z.coerce.number().int().positive().default(30),
-  // Tope de alertas activas (armed + triggered) por usuario (spec alert-store).
-  ALERTS_MAX_ACTIVE: z.coerce.number().int().positive().default(20),
-  SEND_NOTIFICATIONS_CRON: z.string().min(1).default('* * * * *'),
-  NOTIFY_BATCH_SIZE: z.coerce.number().int().positive().default(20),
-  NOTIFY_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
-  NOTIFY_LOCK_TIMEOUT_MIN: z.coerce.number().int().positive().default(10),
-  NOTIFICATIONS_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
-
-  // --- agenda: scheduler (reemplaza node-cron) ---
-  // Punto de extensión documentado a futuro (spec agenda-scheduler / design.md
-  // "Decisions"): hoy el único valor soportado es "agenda"; node-cron se
-  // elimina en esta etapa en lugar de mantenerse detrás de un switch
-  // SCHEDULER=cron.
-  // Verificación de versión de driver (design.md "Risks"): `npm ls mongodb`
-  // resuelve mongoose 9.10.1 -> mongodb@7.6.0, que satisface el peer
-  // dependency de `@agendajs/mongo-backend@4.0.3` (`^6.0.0 || ^7.0.0`, junto
-  // con `agenda@6.2.6` exacto). No hay mismatch: Agenda comparte la conexión
-  // existente de Mongoose en lugar de abrir una segunda.
-  SCHEDULER: z.string().min(1).default('agenda'),
-  // Frecuencia con la que Agenda revisa la colección `agenda_jobs` en busca
-  // de trabajo vencido. Ver design.md "Risks": introduce latencia de
-  // programación de hasta este valor.
-  AGENDA_PROCESS_EVERY: z.string().min(1).default('10 seconds'),
-  AGENDA_MAX_CONCURRENCY: z.coerce.number().int().positive().default(5),
-  // Días que se conservan los documentos de `agenda_jobs` NO recurrentes
-  // (creados por `agenda.now()`) después de finalizar, antes de que el job
-  // `maintenance` los elimine.
-  AGENDA_ONE_OFF_RETENTION_DAYS: z.coerce.number().int().positive().default(7),
-  MAINTENANCE_CRON: z.string().min(1).default('15 3 * * *'),
-  // TTL en milisegundos del lease de `poll-prices` (src/lib/lease-lock.ts).
-  POLL_LOCK_TTL_MS: z.coerce.number().int().positive().default(300000),
-  // Reintentos adicionales permitidos tras un fallo transitorio de
-  // poll-prices (spec job-retry-policy), antes de dejar de reintentar.
-  POLL_MAX_JOB_RETRIES: z.coerce.number().int().min(0).default(1),
-});
-
-// El valor por defecto de TRUST_PROXY, dependiente de NODE_ENV, se aplica
-// acá, después de que el objeto base (y por lo tanto NODE_ENV) ya fue
-// validado/resuelto.
-const envSchema = baseEnvSchema.transform((data) => ({
-  ...data,
-  TRUST_PROXY: data.TRUST_PROXY ?? (data.NODE_ENV === 'production' ? 1 : 0),
-}));
-
-export type Config = Readonly<z.infer<typeof envSchema>>;
 
 export interface EnvIssue {
   readonly variable: string;
@@ -202,7 +139,22 @@ export function parseEnv(source: Record<string, string | undefined>): Config {
     throw new EnvValidationError(issues);
   }
 
-  return Object.freeze(result.data);
+  // Las claves opcionales ausentes (o explícitamente undefined) no deben pisar
+  // el valor de CONSTANTS al hacer el spread.
+  const validated = Object.fromEntries(
+    Object.entries(result.data).filter(([, value]) => value !== undefined),
+  ) as Partial<ValidatedEnv> & Pick<ValidatedEnv, 'MONGODB_URI'>;
+
+  const nodeEnv = validated.NODE_ENV ?? CONSTANTS.NODE_ENV;
+
+  return Object.freeze({
+    ...CONSTANTS,
+    ...validated,
+    NODE_ENV: nodeEnv,
+    LOG_LEVEL: validated.LOG_LEVEL ?? CONSTANTS.LOG_LEVEL,
+    // El default de TRUST_PROXY depende de NODE_ENV, ya resuelto arriba.
+    TRUST_PROXY: validated.TRUST_PROXY ?? (nodeEnv === 'production' ? 1 : 0),
+  } as Config);
 }
 
 /**

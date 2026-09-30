@@ -6,55 +6,39 @@ import {
   EnvValidationError,
   parseEnv,
 } from '../../src/config/env.js';
+import { CONSTANTS } from '../../src/config/constants.js';
 
-/** Tests unitarios de `parseEnv`, `assertCoinGeckoApiKey` y `assertFirebaseCredentials` de `src/config/env.ts`. */
+/** Tests unitarios de `parseEnv` y de las guardas `assert*` de `src/config/env.ts` (secretos, overrides de despliegue y constantes). */
 
 describe('parseEnv', () => {
-  it('returns a fully-typed config with defaults applied for a valid source', () => {
+  it('merges the constants with the validated secrets and applies the derived TRUST_PROXY', () => {
     const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
 
     expect(config).toEqual({
-      NODE_ENV: 'development',
-      PORT: 3000,
+      ...CONSTANTS,
       MONGODB_URI: 'mongodb://localhost:27017',
-      MONGODB_DB_NAME: 'crypto_tracker',
-      LOG_LEVEL: 'info',
-      SHUTDOWN_TIMEOUT_MS: 10000,
-      COINGECKO_BASE_URL: 'https://api.coingecko.com/api/v3',
-      COINGECKO_TIMEOUT_MS: 10000,
-      COINGECKO_MAX_RETRIES: 2,
-      COINGECKO_MAX_IDS_PER_CALL: 50,
-      COINGECKO_READINESS_ENABLED: false,
-      POLL_PRICES_CRON: '*/10 * * * *',
-      POLL_PRICES_RUN_ON_START: true,
-      SNAPSHOT_RETENTION_DAYS: 90,
-      JOB_RUNS_RETENTION_DAYS: 30,
-      STALE_RUN_THRESHOLD_MIN: 15,
-      WORKER_SHUTDOWN_TIMEOUT_MS: 30000,
       TRUST_PROXY: 0,
-      RATE_LIMIT_MAX: 300,
-      RATE_LIMIT_WINDOW_MIN: 15,
-      STALE_POLL_THRESHOLD_MIN: 30,
-      USER_RATE_LIMIT_PER_MIN: 120,
-      LAST_SEEN_THROTTLE_MIN: 5,
-      WATCHLIST_MAX_ITEMS: 50,
-      SMTP_PORT: 587,
-      MAIL_DISPLAY_TIMEZONE: 'America/Argentina/Buenos_Aires',
-      MAIL_MAX_PER_MINUTE: 30,
-      ALERTS_MAX_ACTIVE: 20,
-      SEND_NOTIFICATIONS_CRON: '* * * * *',
-      NOTIFY_BATCH_SIZE: 20,
-      NOTIFY_MAX_ATTEMPTS: 5,
-      NOTIFY_LOCK_TIMEOUT_MIN: 10,
-      NOTIFICATIONS_RETENTION_DAYS: 90,
-      SCHEDULER: 'agenda',
-      AGENDA_PROCESS_EVERY: '10 seconds',
-      AGENDA_MAX_CONCURRENCY: 5,
-      AGENDA_ONE_OFF_RETENTION_DAYS: 7,
-      MAINTENANCE_CRON: '15 3 * * *',
-      POLL_LOCK_TTL_MS: 300000,
-      POLL_MAX_JOB_RETRIES: 1,
     });
+  });
+
+  it('keeps the documented development defaults for the deployment overrides', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.NODE_ENV).toBe('development');
+    expect(config.PORT).toBe(3000);
+    expect(config.LOG_LEVEL).toBe('info');
+    expect(config.SMTP_HOST).toBe('localhost');
+    expect(config.SMTP_PORT).toBe(1025);
+    expect(config.MAIL_FROM).toBe('alerts@crypto-tracker.local');
+    expect(config.FIREBASE_AUTH_EMULATOR_HOST).toBeUndefined();
+  });
+
+  it('exposes SNAPSHOT_RETENTION_DAYS as a number and COINGECKO_READINESS_ENABLED as a boolean', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+
+    expect(config.SNAPSHOT_RETENTION_DAYS).toBe(90);
+    expect(config.COINGECKO_READINESS_ENABLED).toBe(false);
+    expect(config.POLL_PRICES_RUN_ON_START).toBe(true);
   });
 
   it('returns a frozen object', () => {
@@ -124,37 +108,58 @@ describe('parseEnv', () => {
     }
   });
 
-  it('applies documented defaults for all optional variables', () => {
-    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
-
-    expect(config.NODE_ENV).toBe('development');
-    expect(config.PORT).toBe(3000);
-    expect(config.MONGODB_DB_NAME).toBe('crypto_tracker');
-    expect(config.LOG_LEVEL).toBe('info');
-    expect(config.SHUTDOWN_TIMEOUT_MS).toBe(10000);
-  });
-
-  it('coerces numeric strings for PORT and SHUTDOWN_TIMEOUT_MS', () => {
+  it('coerces and applies the PORT and SMTP_PORT overrides', () => {
     const config = parseEnv({
       MONGODB_URI: 'mongodb://localhost:27017',
       PORT: '4000',
-      SHUTDOWN_TIMEOUT_MS: '5000',
+      SMTP_PORT: '587',
     });
 
     expect(config.PORT).toBe(4000);
-    expect(config.SHUTDOWN_TIMEOUT_MS).toBe(5000);
+    expect(config.SMTP_PORT).toBe(587);
   });
 
-  it('rejects a SHUTDOWN_TIMEOUT_MS below 1000', () => {
+  it('applies the SMTP_HOST, MAIL_FROM and LOG_LEVEL overrides', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      SMTP_HOST: 'smtp.example.test',
+      MAIL_FROM: 'alerts@example.test',
+      LOG_LEVEL: 'silent',
+    });
+
+    expect(config.SMTP_HOST).toBe('smtp.example.test');
+    expect(config.MAIL_FROM).toBe('alerts@example.test');
+    expect(config.LOG_LEVEL).toBe('silent');
+  });
+
+  it('does not let an explicitly undefined override wipe the constant default', () => {
+    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', PORT: undefined });
+
+    expect(config.PORT).toBe(3000);
+  });
+
+  it('rejects an out-of-range SMTP_PORT and an invalid LOG_LEVEL', () => {
     expect(() =>
-      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', SHUTDOWN_TIMEOUT_MS: '500' }),
+      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', SMTP_PORT: '70000' }),
+    ).toThrow(EnvValidationError);
+    expect(() =>
+      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', LOG_LEVEL: 'verbose' }),
     ).toThrow(EnvValidationError);
   });
 
-  it('rejects an empty MONGODB_DB_NAME', () => {
-    expect(() =>
-      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', MONGODB_DB_NAME: '' }),
-    ).toThrow(EnvValidationError);
+  it('ignores environment variables that are now constants', () => {
+    const config = parseEnv({
+      MONGODB_URI: 'mongodb://localhost:27017',
+      RATE_LIMIT_MAX: '1',
+      SHUTDOWN_TIMEOUT_MS: '5000',
+      MONGODB_DB_NAME: 'other_db',
+      SNAPSHOT_RETENTION_DAYS: '',
+    });
+
+    expect(config.RATE_LIMIT_MAX).toBe(CONSTANTS.RATE_LIMIT_MAX);
+    expect(config.SHUTDOWN_TIMEOUT_MS).toBe(CONSTANTS.SHUTDOWN_TIMEOUT_MS);
+    expect(config.MONGODB_DB_NAME).toBe(CONSTANTS.MONGODB_DB_NAME);
+    expect(config.SNAPSHOT_RETENTION_DAYS).toBe(CONSTANTS.SNAPSHOT_RETENTION_DAYS);
   });
 
   it('leaves COINGECKO_API_KEY undefined when not provided', () => {
@@ -170,51 +175,6 @@ describe('parseEnv', () => {
     });
 
     expect(config.COINGECKO_API_KEY).toBe('demo-key');
-  });
-
-  it('parses POLL_PRICES_RUN_ON_START as a boolean', () => {
-    const config = parseEnv({
-      MONGODB_URI: 'mongodb://localhost:27017',
-      POLL_PRICES_RUN_ON_START: 'false',
-    });
-
-    expect(config.POLL_PRICES_RUN_ON_START).toBe(false);
-  });
-
-  it('defaults SNAPSHOT_RETENTION_DAYS to 90 when unset', () => {
-    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
-
-    expect(config.SNAPSHOT_RETENTION_DAYS).toBe(90);
-  });
-
-  it('treats an empty SNAPSHOT_RETENTION_DAYS as no expiration (null)', () => {
-    const config = parseEnv({
-      MONGODB_URI: 'mongodb://localhost:27017',
-      SNAPSHOT_RETENTION_DAYS: '',
-    });
-
-    expect(config.SNAPSHOT_RETENTION_DAYS).toBeNull();
-  });
-
-  it('coerces a numeric SNAPSHOT_RETENTION_DAYS string', () => {
-    const config = parseEnv({
-      MONGODB_URI: 'mongodb://localhost:27017',
-      SNAPSHOT_RETENTION_DAYS: '30',
-    });
-
-    expect(config.SNAPSHOT_RETENTION_DAYS).toBe(30);
-  });
-
-  it('rejects a COINGECKO_MAX_RETRIES outside 0-5', () => {
-    expect(() =>
-      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', COINGECKO_MAX_RETRIES: '6' }),
-    ).toThrow(EnvValidationError);
-  });
-
-  it('rejects a COINGECKO_MAX_IDS_PER_CALL outside 1-250', () => {
-    expect(() =>
-      parseEnv({ MONGODB_URI: 'mongodb://localhost:27017', COINGECKO_MAX_IDS_PER_CALL: '0' }),
-    ).toThrow(EnvValidationError);
   });
 
   it('defaults TRUST_PROXY to 0 in development', () => {
@@ -239,15 +199,7 @@ describe('parseEnv', () => {
     expect(config.TRUST_PROXY).toBe(2);
   });
 
-  it('defaults RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MIN and STALE_POLL_THRESHOLD_MIN', () => {
-    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
-
-    expect(config.RATE_LIMIT_MAX).toBe(300);
-    expect(config.RATE_LIMIT_WINDOW_MIN).toBe(15);
-    expect(config.STALE_POLL_THRESHOLD_MIN).toBe(30);
-  });
-
-  it('leaves the Firebase service-account variables undefined when not provided', () => {
+  it('leaves the Firebase and SMTP credentials undefined when not provided', () => {
     const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
 
     expect(config.FIREBASE_PROJECT_ID).toBeUndefined();
@@ -255,6 +207,8 @@ describe('parseEnv', () => {
     expect(config.FIREBASE_PRIVATE_KEY).toBeUndefined();
     expect(config.FIREBASE_WEB_API_KEY).toBeUndefined();
     expect(config.FIREBASE_AUTH_EMULATOR_HOST).toBeUndefined();
+    expect(config.SMTP_USER).toBeUndefined();
+    expect(config.SMTP_PASS).toBeUndefined();
   });
 
   it('accepts the Firebase service-account variables when provided', () => {
@@ -270,22 +224,15 @@ describe('parseEnv', () => {
     expect(config.FIREBASE_PRIVATE_KEY).toContain('BEGIN PRIVATE KEY');
   });
 
-  it('defaults USER_RATE_LIMIT_PER_MIN to 120 and LAST_SEEN_THROTTLE_MIN to 5', () => {
-    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
-
-    expect(config.USER_RATE_LIMIT_PER_MIN).toBe(120);
-    expect(config.LAST_SEEN_THROTTLE_MIN).toBe(5);
-  });
-
-  it('coerces USER_RATE_LIMIT_PER_MIN and LAST_SEEN_THROTTLE_MIN from strings', () => {
+  it('accepts SMTP_USER and SMTP_PASS when provided', () => {
     const config = parseEnv({
       MONGODB_URI: 'mongodb://localhost:27017',
-      USER_RATE_LIMIT_PER_MIN: '60',
-      LAST_SEEN_THROTTLE_MIN: '10',
+      SMTP_USER: 'user',
+      SMTP_PASS: 'pass',
     });
 
-    expect(config.USER_RATE_LIMIT_PER_MIN).toBe(60);
-    expect(config.LAST_SEEN_THROTTLE_MIN).toBe(10);
+    expect(config.SMTP_USER).toBe('user');
+    expect(config.SMTP_PASS).toBe('pass');
   });
 
   it('no longer parses ADMIN_API_KEY', () => {
@@ -411,8 +358,13 @@ describe('assertSmtpCredentials', () => {
     exitSpy.mockRestore();
   });
 
-  it('logs fatal and exits with code 1 when SMTP_HOST and MAIL_FROM are both missing', () => {
-    const config = parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' });
+  it('logs fatal and exits with code 1 when SMTP_HOST and MAIL_FROM are both empty', () => {
+    // Los defaults de CONSTANTS siempre los completan; se fuerzan vacíos a mano.
+    const config = {
+      ...parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' }),
+      SMTP_HOST: '',
+      MAIL_FROM: '',
+    };
     const logger = { fatal: vi.fn() };
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
@@ -427,11 +379,8 @@ describe('assertSmtpCredentials', () => {
     exitSpy.mockRestore();
   });
 
-  it('logs fatal and exits with code 1 when only MAIL_FROM is missing', () => {
-    const config = parseEnv({
-      MONGODB_URI: 'mongodb://localhost:27017',
-      SMTP_HOST: 'localhost',
-    });
+  it('logs fatal and exits with code 1 when only MAIL_FROM is empty', () => {
+    const config = { ...parseEnv({ MONGODB_URI: 'mongodb://localhost:27017' }), MAIL_FROM: '' };
     const logger = { fatal: vi.fn() };
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
 
