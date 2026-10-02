@@ -18,6 +18,7 @@ import {
   cacheControlPublic,
 } from './middlewares/cacheControl.js';
 import { createHealthRouter } from './routes/health.routes.js';
+import { createOpenapiRouter } from './routes/openapi.routes.js';
 import { createCoinsRouter } from './modules/coins/coins.routes.js';
 import { createAdminCoinsRouter } from './modules/coins/coins.admin.routes.js';
 import { createStatusRouter } from './modules/status/status.routes.js';
@@ -141,6 +142,13 @@ export interface CreateAppDeps {
    * conexión de Agenda redundante contra el Mongo compartido.
    */
   readonly agenda?: AgendaProducerHandle;
+  /**
+   * Override exclusivo para tests de la ubicación del `openapi.json` que sirve
+   * `GET /api/v1/openapi.json`. Por defecto, el archivo generado en la raíz del
+   * repositorio (`npm run openapi:generate`). Permite apuntar a un archivo
+   * temporal, o a uno inexistente, sin depender de que el build haya corrido.
+   */
+  readonly openapiFilePath?: string;
 }
 
 /**
@@ -152,7 +160,8 @@ export interface CreateAppDeps {
  *
  * Orden de los middlewares (fijo, no reordenar): configuración de trust
  * proxy -> requestId -> logger de requests -> helmet -> parser de body JSON
- * -> deshabilitar x-powered-by -> rutas de health -> limitador de tasa
+ * -> deshabilitar x-powered-by -> rutas de health -> especificación OpenAPI
+ * (pública, antes del limitador) -> limitador de tasa
  * global (montado solo en `/api`, así `/health` y `/health/ready` quedan
  * exentas) -> rutas de la aplicación bajo `/api/v1` (las rutas de lectura de
  * monedas y la ruta de status, cada una precedida por su middleware
@@ -218,6 +227,11 @@ export function createApp(deps: CreateAppDeps = {}): Express {
   // despliegue que hacen polling de /health y /health/ready nunca se vean
   // limitadas (spec api-rate-limiting).
   app.use(createHealthRouter(readinessChecks));
+
+  // Especificación OpenAPI: pública y registrada antes del limitador de tasa
+  // global y del manejador 404, así que ni se limita ni se confunde con una
+  // ruta inexistente (spec openapi-serving). Se documenta en `openapi.routes.ts`.
+  app.use(createOpenapiRouter({ filePath: deps.openapiFilePath, logger }));
 
   app.use('/api', createRateLimiter(deps.rateLimitConfig ?? config));
 

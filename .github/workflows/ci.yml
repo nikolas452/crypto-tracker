@@ -77,11 +77,31 @@ jobs:
       - run: npm test
 
   # ---------------------------------------------------------------------------
-  # Build — corre al final y solo si los tres jobs anteriores pasaron (needs).
+  # Especificación OpenAPI — genera openapi.json a partir de las anotaciones
+  # `@openapi` de las rutas y de src/docs/components.yaml. El generador valida el
+  # documento contra el esquema de OpenAPI 3.0 y resuelve todos los $ref
+  # (swagger-parser): una anotación malformada o un $ref roto termina con código
+  # distinto de 0. Sin red: todo es local. La paridad con las rutas reales la
+  # verifica tests/integration/openapiContract.test.ts dentro del job de tests.
+  # ---------------------------------------------------------------------------
+  openapi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+      - run: npm ci
+      - name: Generar y validar la especificación OpenAPI
+        run: npm run openapi:generate
+
+  # ---------------------------------------------------------------------------
+  # Build — corre al final y solo si los jobs anteriores pasaron (needs).
   # Fail fast: no tiene sentido compilar si ya sabías que iba a fallar.
   # ---------------------------------------------------------------------------
   build:
-    needs: [typecheck, lint, test]
+    needs: [typecheck, lint, test, openapi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

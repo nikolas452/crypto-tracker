@@ -19,6 +19,50 @@ export function createNotificationsRouter(userRateLimiter: RequestHandler): Rout
 
   router.use(requireAuth(), userRateLimiter);
 
+  /**
+   * @openapi
+   * /api/v1/me/notifications:
+   *   get:
+   *     tags: [notifications]
+   *     summary: Historial de notificaciones del usuario
+   *     description: >-
+   *       Listado paginado de las notificaciones por email generadas por las
+   *       alertas del usuario, de la más reciente a la más antigua. Es la vista del
+   *       usuario: el destinatario (`to`) va enmascarado y del último error solo se
+   *       expone el código. `status` admite un único valor. Las claves de query
+   *       desconocidas se rechazan con `400`. La respuesta es privada y se
+   *       revalida (`Cache-Control: private, no-cache`).
+   *     security:
+   *       - bearerAuth: []
+   *     parameters:
+   *       - $ref: '#/components/parameters/Page'
+   *       - $ref: '#/components/parameters/Limit'
+   *       - name: status
+   *         in: query
+   *         required: false
+   *         description: Filtra por estado de la notificación (un único valor).
+   *         schema:
+   *           $ref: '#/components/schemas/NotificationStatus'
+   *     responses:
+   *       '200':
+   *         description: Página de notificaciones.
+   *         headers:
+   *           X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+   *           Cache-Control: { $ref: '#/components/headers/CacheControlPrivateNoCache' }
+   *           RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+   *           RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+   *           RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+   *           RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/NotificationListResponse'
+   *       '400': { $ref: '#/components/responses/BadRequest' }
+   *       '401': { $ref: '#/components/responses/Unauthorized' }
+   *       '403': { $ref: '#/components/responses/Forbidden' }
+   *       '429': { $ref: '#/components/responses/RateLimited' }
+   *       '500': { $ref: '#/components/responses/InternalError' }
+   */
   router.get('/', async (req, res, next) => {
     try {
       const query = validate(notificationListQuerySchema, req.query, 'query');

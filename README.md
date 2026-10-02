@@ -227,7 +227,7 @@ endpoints (Stage 2)" below.
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `npm run dev`                   | API with auto-reload (`tsx watch src/server.ts`)                                                                                                                                                                       |
 | `npm run dev:worker`            | Worker with auto-reload (`tsx watch src/worker.ts`)                                                                                                                                                                    |
-| `npm run build`                 | Compiles `src/` to `dist/` with `tsc`                                                                                                                                                                                  |
+| `npm run build`                 | Compiles `src/` to `dist/` with `tsc`, then runs `openapi:generate`                                                                                                                                                    |
 | `npm start`                     | Runs the compiled API (`node dist/server.js`)                                                                                                                                                                          |
 | `npm run start:worker`          | Runs the compiled worker (`node dist/worker.js`)                                                                                                                                                                       |
 | `npm run typecheck`             | `tsc --noEmit`                                                                                                                                                                                                         |
@@ -246,6 +246,7 @@ endpoints (Stage 2)" below.
 | `npm run user:set-role`         | Finds a user by email and sets its Mongo `role`: `npm run user:set-role -- --email <e> --role <user\|admin>` (Stage 3). Prints the previous → new role, or an actionable error if the user has no profile yet          |
 | `npm run perf:watchlist`        | Seeds one user with 50 watchlist items and measures RNF-4.1 latency for `GET /api/v1/me/watchlist` (Stage 4) — see "Performance (RNF-4.1)" below                                                                       |
 | `npm run perf:alerts-evaluation`| Seeds 1,000 alerts across 10 coins (none triggering) and measures RNF-5.1 latency for `evaluateAlerts`, the alert-evaluation step inside `poll-prices` (Stage 5) — see "Performance (RNF-5.1)" below                    |
+| `npm run openapi:generate`      | Generates `openapi.json` (repo root, gitignored) from the route annotations and validates it against the OpenAPI 3.0 schema — see "OpenAPI specification" below                                                        |
 
 ## Background worker (Stage 6 — Agenda)
 
@@ -396,6 +397,60 @@ Every other error response uses the single global shape:
 ```
 
 See `requests.http` for ready-to-run sample requests.
+
+## OpenAPI specification
+
+The API describes itself with an OpenAPI **3.0.3** document, hand-authored as
+`@openapi` YAML comments next to each handler (via `swagger-jsdoc`) plus the
+shared definitions in `src/docs/components.yaml` (schemas, parameters, headers,
+common error responses). It is not derived from the Zod schemas or the DTOs, so
+a contract test (below) is what keeps it honest.
+
+- **Where it is served:** `GET /api/v1/openapi.json` — public (no token, outside
+  the global rate limiter), with an `ETag` (send `If-None-Match` for a `304`) and
+  `Cache-Control: public, max-age=300`. It answers `404 NOT_FOUND` if the file
+  was never generated.
+- **How it is produced:** `npm run openapi:generate` writes `openapi.json` in the
+  repo root (build artifact, gitignored). `npm run build` runs it after `tsc`;
+  it fails on a malformed annotation or a broken `$ref`. The server serves that
+  file; it does not scan the sources at startup.
+- **No Swagger UI / Redoc:** deliberately not served, because `helmet`'s default
+  content security policy would block it. Consume the JSON directly.
+
+### Generating frontend types
+
+```bash
+npx openapi-typescript http://localhost:3000/api/v1/openapi.json -o src/api/schema.d.ts
+```
+
+`openapi-typescript` is not a dependency of this repo; run it from the frontend
+(or point it at a local `openapi.json`).
+
+### Annotating a new route
+
+1. Copy the `@openapi` block of a similar route (e.g. `watchlist.routes.ts`) into a
+   JSDoc comment right above the handler.
+2. Use the **full path including `/api/v1`**, a `tags` entry, `security`
+   (`- bearerAuth: []`, or `security: []` for public routes) and every status the
+   handler can really return.
+3. Reuse shared pieces with `$ref`: `#/components/parameters/*`,
+   `#/components/responses/*` (`BadRequest`, `Unauthorized`, `Forbidden`,
+   `NotFound`, `RateLimited`, `InternalError`) and `#/components/headers/*`. Add
+   the response schema for a new DTO to `src/docs/components.yaml`.
+4. Quote any YAML scalar containing `: ` (for example `description: 'Reason: x'`) or
+   use a folded block (`>-`); an unquoted colon breaks the whole block.
+5. Run `npm run openapi:generate` and `npm test`.
+
+### What the contract test enforces
+
+`tests/integration/openapiContract.test.ts` builds the spec in memory, calls every
+documented operation on the real app (`createApp` + in-memory Mongo) and
+validates the status, body and headers against it. It also checks route
+coverage in **both directions**: a route registered in Express without an
+annotation fails, and so does an annotation without a route. A new route
+without `@openapi` therefore fails CI. Request constraints that a response
+validator cannot see (`limit` bounds, `sma` with `interval=raw`, unknown query
+keys) are covered by explicit boundary examples.
 
 ## API endpoints (Stage 2)
 

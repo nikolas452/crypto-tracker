@@ -14,6 +14,35 @@ import { getStatus } from './status.service.js';
 export function createStatusRouter(getDb: () => Db): Router {
   const router = Router();
 
+  /**
+   * @openapi
+   * /api/v1/status:
+   *   get:
+   *     tags: [status]
+   *     summary: Estado operativo de la ingesta de precios
+   *     description: >-
+   *       Cantidad de monedas activas y estado del job recurrente de ingesta de
+   *       precios (última ejecución, si está obsoleto, próxima ejecución y si está
+   *       deshabilitado). No expone detalles internos de las ejecuciones. Es
+   *       público y nunca se cachea (`Cache-Control: no-store`).
+   *     security: []
+   *     responses:
+   *       '200':
+   *         description: Estado actual del sistema.
+   *         headers:
+   *           X-Request-Id: { $ref: '#/components/headers/XRequestId' }
+   *           Cache-Control: { $ref: '#/components/headers/CacheControlNoStore' }
+   *           RateLimit-Policy: { $ref: '#/components/headers/RateLimitPolicy' }
+   *           RateLimit-Limit: { $ref: '#/components/headers/RateLimitLimit' }
+   *           RateLimit-Remaining: { $ref: '#/components/headers/RateLimitRemaining' }
+   *           RateLimit-Reset: { $ref: '#/components/headers/RateLimitReset' }
+   *         content:
+   *           application/json:
+   *             schema:
+   *               $ref: '#/components/schemas/SystemStatusResponse'
+   *       '429': { $ref: '#/components/responses/RateLimited' }
+   *       '500': { $ref: '#/components/responses/InternalError' }
+   */
   router.get('/', async (_req, res, next) => {
     try {
       const status = await getStatus(getDb());

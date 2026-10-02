@@ -1,0 +1,1837 @@
+# Componentes compartidos de la especificación OpenAPI 3.0.3: esquema de seguridad,
+# envoltorio de error, metadatos de paginación, respuestas de error reutilizables,
+# parámetros comunes y headers. swagger-jsdoc ingiere este archivo completo (está
+# en la lista `apis`) y lo fusiona con los bloques `@openapi` de las rutas, que lo
+# referencian con `$ref: '#/components/...'`. Los códigos y valores de enum son
+# cadenas de la API y no se traducen.
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Token de ID de Firebase enviado en el header `Authorization: Bearer <token>`.
+        El token se obtiene en el cliente con el SDK de Firebase Auth
+        (`user.getIdToken()`) tras iniciar sesión; en desarrollo se puede generar con
+        `npm run auth:token`. Solo se acepta en ese header (nunca en query ni body) y
+        no puede superar los 4096 caracteres. Las operaciones destructivas o de
+        administración además verifican si el token fue revocado.
+
+  schemas:
+    ErrorValidationDetail:
+      type: object
+      description: Problema de validación de un campo concreto de la petición.
+      required: [path, message]
+      properties:
+        path:
+          type: string
+          description: >-
+            Ruta del campo con el origen como prefijo: `body.`, `query.` o `params.`
+            (por ejemplo `query.limit`). Si el problema afecta a todo el origen, solo
+            el prefijo (por ejemplo `body`).
+          example: query.limit
+        message:
+          type: string
+          example: 'Too big: expected number to be <=100'
+
+    ErrorBusinessDetails:
+      type: object
+      description: >-
+        Detalle de un error de negocio. Siempre incluye `reason` con un código estable
+        que identifica la causa (por ejemplo `LIMIT_REACHED`); las operaciones listan
+        los `reason` que pueden devolver. En desarrollo, un `INTERNAL_ERROR` incluye
+        `stack` en lugar de `reason`.
+      properties:
+        reason:
+          type: string
+          example: LIMIT_REACHED
+      additionalProperties: true
+
+    Error:
+      type: object
+      description: Envoltorio único de todos los errores de la API.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:
+              type: string
+              description: Código de error estable, apto para lógica del cliente.
+              enum:
+                - VALIDATION_ERROR
+                - UNAUTHENTICATED
+                - TOKEN_EXPIRED
+                - TOKEN_REVOKED
+                - FORBIDDEN
+                - USER_DISABLED
+                - NOT_FOUND
+                - CONFLICT
+                - UNPROCESSABLE
+                - RATE_LIMITED
+                - UPSTREAM_ERROR
+                - FIREBASE_UNAVAILABLE
+                - SERVICE_UNAVAILABLE
+                - INTERNAL_ERROR
+            message:
+              type: string
+              description: Mensaje legible; no debe usarse para lógica del cliente.
+            requestId:
+              type: string
+              description: Identificador de la petición; coincide con el header `X-Request-Id`.
+            details:
+              description: >-
+                Información adicional opcional. En `VALIDATION_ERROR` es una lista de
+                problemas por campo; en errores de negocio es un objeto con `reason`.
+              oneOf:
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/ErrorValidationDetail'
+                - $ref: '#/components/schemas/ErrorBusinessDetails'
+
+    PaginationMeta:
+      type: object
+      description: Metadatos de las respuestas paginadas.
+      required: [page, limit, total, totalPages]
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: Página devuelta.
+          example: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Tamaño de página aplicado.
+          example: 20
+        total:
+          type: integer
+          minimum: 0
+          description: Total de elementos que cumplen el filtro.
+          example: 57
+        totalPages:
+          type: integer
+          minimum: 0
+          description: Total de páginas (0 si no hay resultados).
+          example: 3
+
+    WatchlistMeta:
+      type: object
+      description: Metadatos de la watchlist, que no se pagina.
+      required: [count, max]
+      properties:
+        count:
+          type: integer
+          minimum: 0
+          description: Cantidad de monedas en la watchlist del usuario.
+          example: 4
+        max:
+          type: integer
+          minimum: 1
+          description: Máximo de monedas permitido por usuario.
+          example: 50
+
+    # --- Monedas y precios (públicos) ---
+
+    LatestPrice:
+      type: object
+      nullable: true
+      description: >-
+        Último precio conocido de la moneda. Es `null` mientras la moneda no tenga
+        ninguna actualización de precio (por ejemplo, recién dada de alta).
+      required: [priceUsd, marketCapUsd, volume24hUsd, change24hPct, capturedAt]
+      properties:
+        priceUsd:
+          type: number
+          description: Precio en USD.
+          example: 67250.5
+        marketCapUsd:
+          type: number
+          nullable: true
+          description: Capitalización de mercado en USD, si el proveedor la informa.
+          example: 1320000000000
+        volume24hUsd:
+          type: number
+          nullable: true
+          description: Volumen de las últimas 24 horas en USD, si el proveedor lo informa.
+          example: 28500000000
+        change24hPct:
+          type: number
+          nullable: true
+          description: Variación porcentual de las últimas 24 horas, si el proveedor la informa.
+          example: -1.25
+        capturedAt:
+          type: string
+          format: date-time
+          description: Momento en que se capturó este precio.
+
+    CoinListItem:
+      type: object
+      description: Moneda tal como aparece en el listado.
+      required: [coingeckoId, symbol, name, latest]
+      properties:
+        coingeckoId:
+          type: string
+          pattern: '^[a-z0-9-]+$'
+          example: bitcoin
+        symbol:
+          type: string
+          description: Símbolo en minúsculas.
+          example: btc
+        name:
+          type: string
+          example: Bitcoin
+        latest:
+          $ref: '#/components/schemas/LatestPrice'
+
+    CoinDetail:
+      description: Detalle de una moneda activa.
+      allOf:
+        - $ref: '#/components/schemas/CoinListItem'
+        - type: object
+          required: [trackedSince]
+          properties:
+            trackedSince:
+              type: string
+              format: date-time
+              description: Fecha desde la que la moneda está en el catálogo.
+
+    CoinListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CoinListItem'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    CoinDetailResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/CoinDetail'
+
+    RawHistoryPoint:
+      type: object
+      description: Punto de precio sin agregar (`interval=raw`).
+      required: [t, priceUsd, marketCapUsd, volume24hUsd, change24hPct]
+      properties:
+        t:
+          type: string
+          format: date-time
+          description: Momento de captura del punto.
+        priceUsd:
+          type: number
+        marketCapUsd:
+          type: number
+          nullable: true
+        volume24hUsd:
+          type: number
+          nullable: true
+        change24hPct:
+          type: number
+          nullable: true
+
+    BucketedHistoryPoint:
+      type: object
+      description: >-
+        Bucket horario o diario (`interval=1h` o `1d`) con los precios en USD
+        agregados en formato OHLC.
+      required: [t, open, high, low, close, avg, samples]
+      properties:
+        t:
+          type: string
+          format: date-time
+          description: Inicio del bucket (UTC).
+        open:
+          type: number
+          description: Primer precio del bucket.
+        high:
+          type: number
+          description: Precio máximo del bucket.
+        low:
+          type: number
+          description: Precio mínimo del bucket.
+        close:
+          type: number
+          description: Último precio del bucket.
+        avg:
+          type: number
+          description: Precio promedio del bucket.
+        samples:
+          type: integer
+          minimum: 1
+          description: Cantidad de puntos agregados en el bucket.
+        sma:
+          type: number
+          nullable: true
+          description: >-
+            Media móvil simple de los `close`. Solo está presente cuando se pidió
+            `sma`; es `null` en los primeros `sma - 1` buckets, que aún no completan
+            la ventana.
+
+    PriceHistory:
+      type: object
+      required: [coingeckoId, interval, from, to, points]
+      properties:
+        coingeckoId:
+          type: string
+          example: bitcoin
+        interval:
+          type: string
+          enum: [raw, 1h, 1d]
+          description: Intervalo aplicado (el pedido, o el elegido automáticamente según el rango).
+        from:
+          type: string
+          format: date-time
+          description: Inicio de la ventana consultada.
+        to:
+          type: string
+          format: date-time
+          description: Fin de la ventana consultada.
+        points:
+          type: array
+          description: >-
+            Puntos en orden cronológico ascendente. Con `interval=raw` son
+            `RawHistoryPoint`; con `1h` o `1d` son `BucketedHistoryPoint`.
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/RawHistoryPoint'
+              - $ref: '#/components/schemas/BucketedHistoryPoint'
+
+    CoinHistoryResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/PriceHistory'
+
+    PriceStats:
+      type: object
+      description: >-
+        Estadísticas de precio de la ventana `range` que termina en el momento de la
+        petición. Si no hay datos en la ventana, `samples` es 0 y el resto de las
+        métricas son `null`.
+      required: [coingeckoId, range, from, to, open, close, changePct, min, max, avg, samples, firstAt, lastAt]
+      properties:
+        coingeckoId:
+          type: string
+          example: bitcoin
+        range:
+          type: string
+          enum: [24h, 7d, 30d, 90d]
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        open:
+          type: number
+          nullable: true
+          description: Primer precio de la ventana.
+        close:
+          type: number
+          nullable: true
+          description: Último precio de la ventana.
+        changePct:
+          type: number
+          nullable: true
+          description: Variación porcentual `(close - open) / open * 100`, redondeada a 4 decimales.
+        min:
+          type: number
+          nullable: true
+        max:
+          type: number
+          nullable: true
+        avg:
+          type: number
+          nullable: true
+        samples:
+          type: integer
+          minimum: 0
+          description: Cantidad de puntos considerados.
+        firstAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Momento del primer punto de la ventana.
+        lastAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Momento del último punto de la ventana.
+
+    CoinStatsResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/PriceStats'
+
+    # --- Estado del sistema y salud ---
+
+    SystemStatus:
+      type: object
+      required: [activeCoins, pollPrices]
+      properties:
+        activeCoins:
+          type: integer
+          minimum: 0
+          description: Cantidad de monedas activas en el catálogo.
+        pollPrices:
+          type: object
+          description: Estado del job recurrente de ingesta de precios.
+          required: [lastSuccessAt, lastRunAt, lastRunStatus, stale, nextRunAt, disabled]
+          properties:
+            lastSuccessAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Fin de la última ejecución exitosa o parcial.
+            lastRunAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Inicio de la última ejecución, sea cual sea su resultado.
+            lastRunStatus:
+              type: string
+              nullable: true
+              enum: [running, success, partial, failed, skipped, null]
+              description: Resultado de la última ejecución (`null` si nunca se ejecutó).
+            stale:
+              type: boolean
+              description: >-
+                `true` si no hubo una ejecución exitosa o parcial dentro del umbral
+                configurado de antigüedad (incluye el caso de que nunca haya habido
+                ninguna).
+            nextRunAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Próxima ejecución programada, si el job está programado.
+            disabled:
+              type: boolean
+              description: '`true` si el job recurrente está deshabilitado.'
+
+    SystemStatusResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/SystemStatus'
+
+    HealthLive:
+      type: object
+      description: Respuesta del chequeo de vida.
+      required: [status, uptimeSeconds, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        uptimeSeconds:
+          type: integer
+          minimum: 0
+          description: Segundos desde que arrancó el proceso.
+        timestamp:
+          type: string
+          format: date-time
+
+    HealthReady:
+      type: object
+      description: >-
+        Respuesta del chequeo de disponibilidad. Es la única respuesta de la API
+        que no usa el envoltorio `Error`, ni siquiera cuando es `503`.
+      required: [status, checks, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ready, not_ready]
+          description: '`ready` si todos los chequeos están en `up`; `not_ready` en caso contrario.'
+        checks:
+          type: object
+          description: >-
+            Resultado por chequeo. `mongo` siempre está; otros chequeos
+            opcionales (por ejemplo `coingecko`, si está habilitado) se agregan
+            con su propio nombre.
+          required: [mongo]
+          properties:
+            mongo:
+              type: string
+              enum: [up, down]
+          additionalProperties:
+            type: string
+            enum: [up, down]
+        timestamp:
+          type: string
+          format: date-time
+
+    # --- Usuario autenticado ---
+
+    UserMe:
+      type: object
+      required: [id, email, emailVerified, displayName, role, createdAt]
+      properties:
+        id:
+          type: string
+          description: Identificador del usuario.
+          example: 66a1b2c3d4e5f60718293a4b
+        email:
+          type: string
+          nullable: true
+          description: Email asociado a la cuenta, si lo hay.
+        emailVerified:
+          type: boolean
+          description: Si el email está verificado. Es requisito para crear alertas.
+        displayName:
+          type: string
+          nullable: true
+          description: Nombre para mostrar, o `null` si no se definió.
+        role:
+          type: string
+          enum: [user, admin]
+        createdAt:
+          type: string
+          format: date-time
+
+    UserMeResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/UserMe'
+
+    WatchlistItem:
+      type: object
+      required: [coingeckoId, symbol, name, isActive, note, addedAt, latest]
+      properties:
+        coingeckoId:
+          type: string
+          pattern: '^[a-z0-9-]+$'
+          example: bitcoin
+        symbol:
+          type: string
+          example: btc
+        name:
+          type: string
+          example: Bitcoin
+        isActive:
+          type: boolean
+          description: >-
+            Si la moneda sigue activa en el catálogo. Una moneda desactivada
+            permanece en la watchlist hasta que el usuario la quite.
+        note:
+          type: string
+          nullable: true
+          description: Nota del usuario (hasta 200 caracteres).
+        addedAt:
+          type: string
+          format: date-time
+        latest:
+          $ref: '#/components/schemas/LatestPrice'
+
+    WatchlistResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/WatchlistItem'
+        meta:
+          $ref: '#/components/schemas/WatchlistMeta'
+
+    WatchlistItemResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/WatchlistItem'
+
+    # --- Alertas del usuario ---
+
+    AlertType:
+      type: string
+      enum: [PRICE_ABOVE, PRICE_BELOW, CHANGE_24H_ABS_GTE]
+      description: >-
+        `PRICE_ABOVE` se cumple cuando el precio sube hasta el umbral o más;
+        `PRICE_BELOW` cuando baja hasta el umbral o menos; `CHANGE_24H_ABS_GTE`
+        cuando el valor absoluto de la variación de 24 horas alcanza el umbral
+        (en puntos porcentuales).
+
+    AlertMode:
+      type: string
+      enum: [once, recurring]
+      description: >-
+        `once` dispara una sola vez y la alerta pasa a `completed`; `recurring`
+        se rearma tras el disparo. Si se omite al crear, es `recurring`.
+
+    AlertStatus:
+      type: string
+      enum: [armed, triggered, completed, disabled]
+      description: >-
+        `armed` y `triggered` cuentan contra el máximo de alertas activas por
+        usuario; `completed` y `disabled` no.
+
+    Alert:
+      type: object
+      required:
+        - id
+        - coingeckoId
+        - type
+        - threshold
+        - mode
+        - status
+        - cooldownMinutes
+        - rearmPct
+        - note
+        - version
+        - triggerCount
+        - lastTriggeredAt
+        - lastTriggeredValue
+        - lastEvaluatedAt
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          example: 66a1b2c3d4e5f60718293a4b
+        coingeckoId:
+          type: string
+          example: bitcoin
+        type:
+          $ref: '#/components/schemas/AlertType'
+        threshold:
+          type: number
+          description: Umbral de la alerta (USD para los tipos de precio, puntos porcentuales para el de variación).
+        mode:
+          $ref: '#/components/schemas/AlertMode'
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        cooldownMinutes:
+          type: integer
+          description: Minutos mínimos entre dos disparos de una alerta recurrente.
+        rearmPct:
+          type: number
+          description: Porcentaje de margen que el valor debe recuperar para rearmar una alerta recurrente.
+        note:
+          type: string
+          nullable: true
+        version:
+          type: integer
+          description: Contador que se incrementa con cada modificación de la alerta.
+        triggerCount:
+          type: integer
+          minimum: 0
+          description: Cantidad de veces que la alerta se disparó.
+        lastTriggeredAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastTriggeredValue:
+          type: number
+          nullable: true
+          description: Valor que cruzó el umbral en el último disparo.
+        lastEvaluatedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Última vez que la evaluación cambió el estado de la alerta (disparo o
+            rearme); no se actualiza en evaluaciones sin cambios.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AlertListItem:
+      description: Alerta con los datos básicos de su moneda.
+      allOf:
+        - $ref: '#/components/schemas/Alert'
+        - type: object
+          required: [coin]
+          properties:
+            coin:
+              type: object
+              required: [symbol, name, isActive, latest]
+              properties:
+                symbol:
+                  type: string
+                name:
+                  type: string
+                isActive:
+                  type: boolean
+                latest:
+                  $ref: '#/components/schemas/AlertCoinLatestPrice'
+
+    AlertCoinLatestPrice:
+      description: >-
+        Último precio de la moneda en el listado de alertas. A diferencia de
+        `LatestPrice`, esta lista devuelve el subdocumento `latest` de la moneda
+        tal como está guardado, así que además incluye `sourceUpdatedAt`. Es
+        `null` mientras la moneda no tenga ninguna actualización de precio.
+      allOf:
+        - $ref: '#/components/schemas/LatestPrice'
+        - type: object
+          properties:
+            sourceUpdatedAt:
+              type: string
+              format: date-time
+              nullable: true
+              description: Momento en que el proveedor actualizó el precio, si lo informa.
+
+    AlertListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertListItem'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    AlertResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/Alert'
+
+    AlertCreateResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          $ref: '#/components/schemas/Alert'
+        meta:
+          type: object
+          description: Estado de la condición al momento de crear la alerta (no dispara nada por sí mismo).
+          required: [currentValue, conditionCurrentlyMet]
+          properties:
+            currentValue:
+              type: number
+              nullable: true
+              description: >-
+                Valor actual comparado con el umbral (precio, o variación de 24 horas
+                según el tipo). `null` si la moneda aún no tiene precio o la
+                variación no está disponible.
+            conditionCurrentlyMet:
+              type: boolean
+              description: Si la condición ya se cumple en este momento.
+
+    # Las tres variantes de alta son objetos planos (sin `allOf`) porque cada una
+    # declara `type` como enum de un solo valor y su propio rango de `threshold`;
+    # así el discriminador `type` se resuelve directamente sobre cada variante.
+    AlertCreatePriceAbove:
+      type: object
+      additionalProperties: false
+      required: [type, coingeckoId, threshold]
+      properties:
+        type:
+          type: string
+          enum: [PRICE_ABOVE]
+        coingeckoId:
+          type: string
+          minLength: 1
+          description: Moneda a vigilar; debe existir y estar activa.
+          example: bitcoin
+        threshold:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 1000000000
+          description: Precio umbral en USD (mayor que 0 y hasta 1000000000).
+        mode:
+          $ref: '#/components/schemas/AlertMode'
+        cooldownMinutes:
+          type: integer
+          minimum: 5
+          maximum: 10080
+          default: 60
+          description: Minutos mínimos entre disparos (5 a 10080).
+        rearmPct:
+          type: number
+          minimum: 0
+          maximum: 20
+          default: 1
+          description: Margen porcentual de rearme (0 a 20).
+        note:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Nota opcional (hasta 200 caracteres, se recorta).
+
+    AlertCreatePriceBelow:
+      type: object
+      additionalProperties: false
+      required: [type, coingeckoId, threshold]
+      properties:
+        type:
+          type: string
+          enum: [PRICE_BELOW]
+        coingeckoId:
+          type: string
+          minLength: 1
+          description: Moneda a vigilar; debe existir y estar activa.
+          example: bitcoin
+        threshold:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 1000000000
+          description: Precio umbral en USD (mayor que 0 y hasta 1000000000).
+        mode:
+          $ref: '#/components/schemas/AlertMode'
+        cooldownMinutes:
+          type: integer
+          minimum: 5
+          maximum: 10080
+          default: 60
+          description: Minutos mínimos entre disparos (5 a 10080).
+        rearmPct:
+          type: number
+          minimum: 0
+          maximum: 20
+          default: 1
+          description: Margen porcentual de rearme (0 a 20).
+        note:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Nota opcional (hasta 200 caracteres, se recorta).
+
+    AlertCreateChange24hAbsGte:
+      type: object
+      additionalProperties: false
+      required: [type, coingeckoId, threshold]
+      properties:
+        type:
+          type: string
+          enum: [CHANGE_24H_ABS_GTE]
+        coingeckoId:
+          type: string
+          minLength: 1
+          description: Moneda a vigilar; debe existir y estar activa.
+          example: bitcoin
+        threshold:
+          type: number
+          minimum: 0.1
+          maximum: 100
+          description: Variación absoluta de 24 horas en puntos porcentuales (0.1 a 100).
+        mode:
+          $ref: '#/components/schemas/AlertMode'
+        cooldownMinutes:
+          type: integer
+          minimum: 5
+          maximum: 10080
+          default: 60
+          description: Minutos mínimos entre disparos (5 a 10080).
+        rearmPct:
+          type: number
+          minimum: 0
+          maximum: 20
+          default: 1
+          description: Margen porcentual de rearme (0 a 20).
+        note:
+          type: string
+          nullable: true
+          maxLength: 200
+          description: Nota opcional (hasta 200 caracteres, se recorta).
+
+    AlertCreateRequest:
+      description: >-
+        Cuerpo de alta de una alerta. El campo `type` selecciona la variante y, con
+        ella, el rango válido de `threshold`. Las claves desconocidas se rechazan
+        con `400`.
+      oneOf:
+        - $ref: '#/components/schemas/AlertCreatePriceAbove'
+        - $ref: '#/components/schemas/AlertCreatePriceBelow'
+        - $ref: '#/components/schemas/AlertCreateChange24hAbsGte'
+      discriminator:
+        propertyName: type
+
+    AlertUpdateRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: >-
+        Cuerpo de edición de una alerta. Exige al menos un campo y no admite `type`
+        (inmutable) ni ningún otro campo no listado: se rechazan con `400`.
+      properties:
+        threshold:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 1000000000
+          description: >-
+            Nuevo umbral. Además se valida contra el rango del tipo ya guardado
+            (`CHANGE_24H_ABS_GTE` admite de 0.1 a 100). Cambiarlo en una alerta
+            `triggered` la rearma.
+        cooldownMinutes:
+          type: integer
+          minimum: 5
+          maximum: 10080
+        rearmPct:
+          type: number
+          minimum: 0
+          maximum: 20
+        note:
+          type: string
+          nullable: true
+          maxLength: 200
+        mode:
+          $ref: '#/components/schemas/AlertMode'
+        enabled:
+          type: boolean
+          description: >-
+            `false` deshabilita la alerta (`disabled`). `true` la vuelve a armar solo
+            si estaba `disabled` o `completed`, y falla con `422` `LIMIT_REACHED` si el
+            usuario ya está en el máximo de alertas activas.
+
+    # --- Notificaciones (vista del usuario) ---
+    # La vista administrativa es un esquema aparte (`AdminNotification`): la del
+    # usuario enmascara el destinatario y expone solo el código del último error.
+
+    NotificationStatus:
+      type: string
+      enum: [pending, sending, sent, failed, cancelled]
+
+    NotificationPayload:
+      type: object
+      description: Instantánea congelada del evento que originó la notificación.
+      required: [coingeckoId, coinName, symbol, alertType, threshold, value, priceUsd, change24hPct, triggeredAt, note]
+      properties:
+        coingeckoId:
+          type: string
+        coinName:
+          type: string
+        symbol:
+          type: string
+        alertType:
+          $ref: '#/components/schemas/AlertType'
+        threshold:
+          type: number
+        value:
+          type: number
+          description: Valor que cruzó el umbral (precio o variación de 24 horas, según el tipo).
+        priceUsd:
+          type: number
+        change24hPct:
+          type: number
+          nullable: true
+        triggeredAt:
+          type: string
+          format: date-time
+        note:
+          type: string
+          nullable: true
+
+    Notification:
+      type: object
+      description: >-
+        Notificación por email de una alerta disparada, en su vista de usuario: el
+        destinatario va enmascarado y del último error solo se expone el código.
+      required: [id, alertId, status, to, payload, attempts, sentAt, createdAt, lastError]
+      properties:
+        id:
+          type: string
+        alertId:
+          type: string
+        status:
+          $ref: '#/components/schemas/NotificationStatus'
+        to:
+          type: string
+          description: Email destinatario enmascarado.
+          example: j***@example.com
+        payload:
+          $ref: '#/components/schemas/NotificationPayload'
+        attempts:
+          type: integer
+          minimum: 0
+          description: Intentos de envío realizados.
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        lastError:
+          type: object
+          nullable: true
+          description: Último error de envío, o `null` si no hubo.
+          required: [code]
+          properties:
+            code:
+              type: string
+              description: Código del error.
+
+    NotificationListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    # --- Administración de monedas ---
+
+    AdminCoin:
+      type: object
+      description: >-
+        Moneda en su vista de administración: a diferencia de la vista pública,
+        incluye las monedas inactivas (`isActive`) y la cantidad de usuarios que la
+        siguen (`watchersCount`).
+      required: [coingeckoId, symbol, name, isActive, latest, watchersCount]
+      properties:
+        coingeckoId:
+          type: string
+          pattern: '^[a-z0-9-]+$'
+          example: bitcoin
+        symbol:
+          type: string
+          description: Símbolo en minúsculas.
+          example: btc
+        name:
+          type: string
+          example: Bitcoin
+        isActive:
+          type: boolean
+          description: Si la moneda está activa (el job de precios solo consulta las activas).
+        latest:
+          $ref: '#/components/schemas/LatestPrice'
+        watchersCount:
+          type: integer
+          minimum: 0
+          description: Cantidad de usuarios que tienen la moneda en su watchlist.
+
+    AdminCoinResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/AdminCoin'
+
+    AdminCoinListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminCoin'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    AdminCoinCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [coingeckoId]
+      description: Cuerpo del alta o reactivación de una moneda. Las claves desconocidas se rechazan con `400`.
+      properties:
+        coingeckoId:
+          type: string
+          minLength: 1
+          description: >-
+            Identificador de la moneda en CoinGecko. Se recorta y se pasa a
+            minúsculas antes de validarlo contra CoinGecko.
+          example: solana
+
+    AdminCoinSetActiveRequest:
+      type: object
+      additionalProperties: false
+      required: [isActive]
+      description: Cuerpo de activación o desactivación de una moneda. Las claves desconocidas se rechazan con `400`.
+      properties:
+        isActive:
+          type: boolean
+          description: '`true` activa la moneda y `false` la desactiva (nunca se borra).'
+
+    # --- Historial de ejecuciones de jobs (administración) ---
+
+    JobName:
+      type: string
+      enum: [poll-prices, send-notifications, maintenance]
+      description: Nombre de uno de los tres jobs recurrentes del scheduler.
+
+    JobRunStatus:
+      type: string
+      enum: [running, success, partial, failed, skipped]
+
+    JobRunTrigger:
+      type: string
+      enum: [schedule, manual, startup, agenda, retry, api]
+      description: >-
+        Origen de la ejecución. `schedule` solo aparece en corridas anteriores a la
+        migración a Agenda; `api` es un disparo manual desde `POST /api/v1/admin/jobs/{name}/run`.
+
+    JobRunSkipReason:
+      type: string
+      enum: [overlap, no_active_coins, locked]
+      description: Motivo por el que una corrida quedó en `skipped`.
+
+    JobRunStats:
+      type: object
+      description: >-
+        Contadores de la corrida. Los siete primeros son los de ingesta de precios;
+        el resto (evaluación de alertas y envío de notificaciones) los guarda el
+        modelo en las corridas recientes y puede faltar en registros antiguos.
+      required:
+        - coinsRequested
+        - coinsReturned
+        - snapshotsInserted
+        - skippedUnchanged
+        - missingCoins
+        - upstreamAttempts
+        - latestUpdated
+      properties:
+        coinsRequested:
+          type: integer
+          minimum: 0
+        coinsReturned:
+          type: integer
+          minimum: 0
+        snapshotsInserted:
+          type: integer
+          minimum: 0
+        skippedUnchanged:
+          type: integer
+          minimum: 0
+        missingCoins:
+          type: array
+          description: Identificadores pedidos a CoinGecko que no volvieron en la respuesta.
+          items:
+            type: string
+        upstreamAttempts:
+          type: integer
+          minimum: 0
+        latestUpdated:
+          type: integer
+          minimum: 0
+        alertsEvaluated:
+          type: integer
+          minimum: 0
+        alertsTriggered:
+          type: integer
+          minimum: 0
+        alertsRearmed:
+          type: integer
+          minimum: 0
+        alertsInCooldown:
+          type: integer
+          minimum: 0
+        triggerConflicts:
+          type: integer
+          minimum: 0
+        claimed:
+          type: integer
+          minimum: 0
+        sent:
+          type: integer
+          minimum: 0
+        retried:
+          type: integer
+          minimum: 0
+        failedPermanent:
+          type: integer
+          minimum: 0
+        failedExhausted:
+          type: integer
+          minimum: 0
+        cancelled:
+          type: integer
+          minimum: 0
+        recoveredStale:
+          type: integer
+          minimum: 0
+
+    JobRun:
+      type: object
+      description: Registro de una ejecución de un job (colección `job_runs`).
+      required:
+        - id
+        - jobName
+        - trigger
+        - status
+        - skipReason
+        - startedAt
+        - finishedAt
+        - durationMs
+        - stats
+        - error
+        - workerId
+        - agendaJobId
+        - attempt
+      properties:
+        id:
+          type: string
+          example: 66a1b2c3d4e5f60718293a4b
+        jobName:
+          type: string
+          example: poll-prices
+        trigger:
+          $ref: '#/components/schemas/JobRunTrigger'
+        status:
+          $ref: '#/components/schemas/JobRunStatus'
+        skipReason:
+          type: string
+          nullable: true
+          enum: [overlap, no_active_coins, locked, null]
+          description: Motivo de omisión; `null` salvo que `status` sea `skipped`.
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Fin de la corrida; `null` mientras sigue en `running`.
+        durationMs:
+          type: number
+          nullable: true
+          description: Duración en milisegundos; `null` mientras sigue en `running`.
+        stats:
+          $ref: '#/components/schemas/JobRunStats'
+        error:
+          type: object
+          nullable: true
+          description: Error de la corrida, o `null` si no hubo. Nunca incluye trazas ni secretos.
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+        workerId:
+          type: string
+          description: Identificador del proceso worker que ejecutó la corrida.
+        agendaJobId:
+          type: string
+          nullable: true
+          description: Identificador del documento de Agenda que originó la corrida, si lo hay.
+        attempt:
+          type: integer
+          minimum: 1
+          description: Número de intento (1 la corrida original, 2 su único reintento).
+
+    JobRunResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/JobRun'
+
+    JobRunListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobRun'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    # --- Jobs programados (administración) ---
+
+    RecurringJob:
+      type: object
+      description: Estado de uno de los tres jobs recurrentes, leído de Agenda.
+      required:
+        - name
+        - schedule
+        - nextRunAt
+        - lastRunAt
+        - lastFinishedAt
+        - failCount
+        - failReason
+        - failedAt
+        - lockedAt
+        - disabled
+        - lastJobRun
+      properties:
+        name:
+          $ref: '#/components/schemas/JobName'
+        schedule:
+          type: string
+          nullable: true
+          description: Expresión cron registrada, o `null` si el job aún no fue registrado.
+          example: '*/5 * * * *'
+        nextRunAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastRunAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastFinishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        failCount:
+          type: integer
+          minimum: 0
+        failReason:
+          type: string
+          nullable: true
+        failedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lockedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Momento en que un worker tomó el job; `null` si no está en ejecución.
+        disabled:
+          type: boolean
+          description: '`true` si el job está deshabilitado y no se programa ni se puede disparar.'
+        lastJobRun:
+          type: object
+          nullable: true
+          description: Resumen de la corrida más reciente del job, o `null` si nunca se registró una.
+          required: [status, finishedAt]
+          properties:
+            status:
+              $ref: '#/components/schemas/JobRunStatus'
+            finishedAt:
+              type: string
+              format: date-time
+              nullable: true
+
+    OneOffJob:
+      type: object
+      description: Job puntual (disparo manual o reintento) de las últimas 24 horas.
+      required: [agendaJobId, name, nextRunAt, lastRunAt, lastFinishedAt, failCount, failReason, data]
+      properties:
+        agendaJobId:
+          type: string
+        name:
+          type: string
+          example: poll-prices
+        nextRunAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastRunAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastFinishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        failCount:
+          type: integer
+          minimum: 0
+        failReason:
+          type: string
+          nullable: true
+        data:
+          description: Datos con los que se encoló el job (cualquier valor JSON, o `null`).
+
+    JobsList:
+      type: object
+      required: [recurring]
+      properties:
+        recurring:
+          type: array
+          description: Los tres jobs recurrentes, en el orden `poll-prices`, `send-notifications`, `maintenance`.
+          items:
+            $ref: '#/components/schemas/RecurringJob'
+        oneOff:
+          type: array
+          description: Solo está presente con `includeOneOff=true`.
+          items:
+            $ref: '#/components/schemas/OneOffJob'
+
+    JobsListResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/JobsList'
+
+    JobTriggerResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [agendaJobId, name, queuedAt]
+          properties:
+            agendaJobId:
+              type: string
+              nullable: true
+              description: Identificador del job encolado en Agenda.
+            name:
+              $ref: '#/components/schemas/JobName'
+            queuedAt:
+              type: string
+              format: date-time
+              description: Momento en que la API encoló el job (no cuándo se ejecuta).
+
+    JobToggleResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [name, disabled]
+          properties:
+            name:
+              $ref: '#/components/schemas/JobName'
+            disabled:
+              type: boolean
+              description: Estado resultante del job.
+
+    # --- Notificaciones (vista administrativa) ---
+
+    AdminNotification:
+      type: object
+      description: >-
+        Notificación en su vista de administración. A diferencia de la vista del
+        usuario (`Notification`), expone el último error completo (`code`,
+        `message` y `permanent`) y `lockedBy`. El destinatario (`to`) sigue
+        enmascarado igual que en la vista del usuario.
+      required: [id, alertId, status, to, payload, attempts, sentAt, createdAt, lastError, lockedBy]
+      properties:
+        id:
+          type: string
+        alertId:
+          type: string
+        status:
+          $ref: '#/components/schemas/NotificationStatus'
+        to:
+          type: string
+          description: Email destinatario enmascarado.
+          example: j***@example.com
+        payload:
+          $ref: '#/components/schemas/NotificationPayload'
+        attempts:
+          type: integer
+          minimum: 0
+          description: Intentos de envío realizados.
+        sentAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        lastError:
+          type: object
+          nullable: true
+          description: Último error de envío completo, o `null` si no hubo.
+          required: [code, message, permanent]
+          properties:
+            code:
+              type: string
+              description: Código del error (por ejemplo `SMTP_REJECTED` o `SMTP_UNAVAILABLE`).
+            message:
+              type: string
+            permanent:
+              type: boolean
+              description: '`true` si el error no admite reintento automático.'
+        lockedBy:
+          type: string
+          nullable: true
+          description: Identificador del worker que tiene reclamada la notificación, si la hay.
+
+    AdminNotificationResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/AdminNotification'
+
+    AdminNotificationListResponse:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminNotification'
+        meta:
+          $ref: '#/components/schemas/PaginationMeta'
+
+    AdminTestEmailRequest:
+      type: object
+      additionalProperties: false
+      description: Cuerpo vacío. Cualquier clave se rechaza con `400`; el cuerpo es opcional.
+
+    AdminTestEmailResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [messageId]
+          properties:
+            messageId:
+              type: string
+              description: Identificador del mensaje devuelto por el servidor SMTP.
+
+  parameters:
+    CoingeckoId:
+      name: coingeckoId
+      in: path
+      required: true
+      description: Identificador de la moneda en CoinGecko (minúsculas, dígitos y guiones).
+      schema:
+        type: string
+        pattern: '^[a-z0-9-]+$'
+        example: bitcoin
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Número de página, base 1.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: >-
+        Elementos por página. Todos los listados paginados comparten estos límites
+        (1 a 100, por defecto 20); si un listado difiere, lo declara en línea.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    AlertId:
+      name: id
+      in: path
+      required: true
+      description: >-
+        Identificador de la alerta (ObjectId de 24 caracteres hexadecimales). Un
+        identificador con otro formato produce `400`; una alerta inexistente o de
+        otro usuario produce `404`.
+      schema:
+        type: string
+        pattern: '^[a-fA-F0-9]{24}$'
+        example: 66a1b2c3d4e5f60718293a4b
+
+    JobRunId:
+      name: id
+      in: path
+      required: true
+      description: >-
+        Identificador de la ejecución (ObjectId de 24 caracteres hexadecimales). Un
+        identificador con otro formato produce `400`; una ejecución inexistente
+        produce `404`.
+      schema:
+        type: string
+        pattern: '^[a-fA-F0-9]{24}$'
+        example: 66a1b2c3d4e5f60718293a4b
+
+    NotificationId:
+      name: id
+      in: path
+      required: true
+      description: >-
+        Identificador de la notificación (ObjectId de 24 caracteres hexadecimales).
+        Un identificador con otro formato produce `400`.
+      schema:
+        type: string
+        pattern: '^[a-fA-F0-9]{24}$'
+        example: 66a1b2c3d4e5f60718293a4b
+
+    JobNamePath:
+      name: name
+      in: path
+      required: true
+      description: >-
+        Nombre del job: `poll-prices`, `send-notifications` o `maintenance`. Un
+        nombre que no sea uno de esos tres produce `404`.
+      schema:
+        type: string
+        minLength: 1
+        example: poll-prices
+
+  headers:
+    ETag:
+      description: >-
+        Validador débil de la respuesta. Se puede reenviar en `If-None-Match` para
+        obtener `304` si el contenido no cambió.
+      schema:
+        type: string
+        example: 'W/"2a4-Tf3QxJ8o"'
+    CacheControlPublic:
+      description: Cacheable por cachés compartidas durante 60 segundos (monedas).
+      schema:
+        type: string
+        enum: ['public, max-age=60']
+    CacheControlNoStore:
+      description: No debe almacenarse en ninguna caché (status y administración).
+      schema:
+        type: string
+        enum: [no-store]
+    CacheControlPrivateNoCache:
+      description: >-
+        Solo caché privada y siempre con revalidación (watchlist, alertas y
+        notificaciones del usuario).
+      schema:
+        type: string
+        enum: ['private, no-cache']
+    Location:
+      description: Ruta del recurso recién creado.
+      schema:
+        type: string
+        example: /api/v1/me/watchlist/bitcoin
+    XRequestId:
+      description: >-
+        Identificador de la petición. Se reutiliza el `X-Request-Id` entrante si tiene
+        hasta 128 caracteres; si no, se genera un UUID v4.
+      schema:
+        type: string
+        example: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    RateLimitPolicy:
+      description: Política de límite de tasa aplicada, en formato `<límite>;w=<ventana en segundos>`.
+      schema:
+        type: string
+        example: 100;w=900
+    RateLimitLimit:
+      description: Peticiones permitidas en la ventana actual.
+      schema:
+        type: integer
+        example: 100
+    RateLimitRemaining:
+      description: Peticiones restantes en la ventana actual.
+      schema:
+        type: integer
+        example: 99
+    RateLimitReset:
+      description: Segundos hasta que se reinicia la ventana.
+      schema:
+        type: integer
+        example: 900
+    RetryAfter:
+      description: Segundos que el cliente debe esperar antes de reintentar. Solo en respuestas `429`.
+      schema:
+        type: integer
+        example: 60
+    CacheControl:
+      description: >-
+        Política de caché de la ruta: `public, max-age=60` en monedas, `no-store` en
+        status y administración, `private, no-cache` en watchlist, alertas y
+        notificaciones del usuario.
+      schema:
+        type: string
+        example: no-store
+
+  responses:
+    BadRequest:
+      description: >-
+        Petición inválida. `VALIDATION_ERROR` con `details` como lista de
+        `{ path, message }` (el `path` lleva el prefijo `body.`, `query.` o `params.`)
+        cuando falla la validación de campos; también se devuelve con `details`
+        ausente para un JSON malformado o un identificador inválido. Las claves
+        desconocidas en query o body se rechazan.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            validation:
+              summary: Campo inválido
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: Datos inválidos
+                  requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+                  details:
+                    - path: query.limit
+                      message: 'Too big: expected number to be <=100'
+            malformedJson:
+              summary: JSON malformado
+              value:
+                error:
+                  code: VALIDATION_ERROR
+                  message: JSON inválido
+                  requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    PayloadTooLarge:
+      description: El cuerpo de la petición supera el máximo de 100 KB.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: JSON inválido
+              requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    Unauthorized:
+      description: >-
+        Falta el token, es inválido, venció o fue revocado. El código distingue el
+        caso: `UNAUTHENTICATED`, `TOKEN_EXPIRED` o `TOKEN_REVOKED`.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            unauthenticated:
+              summary: Token ausente o inválido
+              value:
+                error:
+                  code: UNAUTHENTICATED
+                  message: No autenticado
+                  requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+            expired:
+              summary: Token vencido
+              value:
+                error:
+                  code: TOKEN_EXPIRED
+                  message: Token vencido
+                  requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    Forbidden:
+      description: >-
+        Autenticado pero sin permiso: `FORBIDDEN` si falta el rol requerido o
+        `USER_DISABLED` si la cuenta está deshabilitada.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            forbidden:
+              summary: Rol insuficiente
+              value:
+                error:
+                  code: FORBIDDEN
+                  message: No tiene permiso
+                  requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+            userDisabled:
+              summary: Cuenta deshabilitada
+              value:
+                error:
+                  code: USER_DISABLED
+                  message: Usuario deshabilitado
+                  requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    NotFound:
+      description: El recurso o la ruta solicitada no existe.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Recurso no encontrado
+              requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    RateLimited:
+      description: >-
+        Se superó el límite de peticiones (por IP en `/api`, y por usuario en las
+        rutas autenticadas). Reintente tras el tiempo indicado en `Retry-After`.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        Retry-After:
+          $ref: '#/components/headers/RetryAfter'
+        RateLimit-Policy:
+          $ref: '#/components/headers/RateLimitPolicy'
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: RATE_LIMITED
+              message: Límite de peticiones superado
+              requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    InternalError:
+      description: >-
+        Error inesperado del servidor. En desarrollo, `details.stack` incluye la
+        traza; en producción `details` no se envía.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: Error interno
+              requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    FirebaseUnavailable:
+      description: >-
+        No se pudo comprobar la revocación del token porque Firebase no respondió
+        (`FIREBASE_UNAVAILABLE`). Aplica a las operaciones que verifican la
+        revocación; se puede reintentar.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: FIREBASE_UNAVAILABLE
+              message: Firebase no disponible al verificar el token
+              requestId: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+    NotModified:
+      description: >-
+        El contenido no cambió respecto del `ETag` enviado en `If-None-Match`; la
+        respuesta no tiene cuerpo.
+      headers:
+        ETag:
+          $ref: '#/components/headers/ETag'
+        Cache-Control:
+          $ref: '#/components/headers/CacheControlPublic'
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+    NoContent:
+      description: Operación exitosa; la respuesta no tiene cuerpo.
+      headers:
+        X-Request-Id:
+          $ref: '#/components/headers/XRequestId'
+        RateLimit-Policy:
+          $ref: '#/components/headers/RateLimitPolicy'
+        RateLimit-Limit:
+          $ref: '#/components/headers/RateLimitLimit'
+        RateLimit-Remaining:
+          $ref: '#/components/headers/RateLimitRemaining'
+        RateLimit-Reset:
+          $ref: '#/components/headers/RateLimitReset'
