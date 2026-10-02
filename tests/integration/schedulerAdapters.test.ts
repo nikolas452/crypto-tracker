@@ -10,7 +10,7 @@ import { createSnapshotsRepo } from '../../src/modules/snapshots/snapshots.servi
 import { createJobRunsRepo } from '../../src/modules/job-runs/job-runs.service.js';
 import { createPollPricesJob } from '../../src/jobs/pollPrices.js';
 import { createFixedClock, systemClock } from '../../src/lib/clock.js';
-import { acquire } from '../../src/lib/lease-lock.js';
+import { acquire, release } from '../../src/lib/lease-lock.js';
 import { createPollPricesAdapter } from '../../src/scheduler/adapters.js';
 import { createAgenda, JOB_NAMES } from '../../src/scheduler/agenda.js';
 import { clearDatabase, startInMemoryMongo, stopInMemoryMongo } from '../helpers/mongoMemory.js';
@@ -153,6 +153,26 @@ describe('poll-prices adapter (integration)', () => {
     const runAt = new Date('2026-01-01T00:00:00.000Z');
     let callCount = 0;
 
+    // El lease solo excluye mientras la corrida está en curso: si el job
+    // ganador termina y libera antes de que el otro intente adquirir, el
+    // segundo lo toma legítimamente. Para que el solapamiento no dependa del
+    // timing, el ganador retiene el lease hasta que ambos adaptadores hayan
+    // intentado adquirirlo.
+    let acquireAttempts = 0;
+    let markBothTried!: () => void;
+    const bothTried = new Promise<void>((resolve) => {
+      markBothTried = resolve;
+    });
+    const gatedLease = {
+      acquire: async (...args: Parameters<typeof acquire>) => {
+        const acquired = await acquire(...args);
+        acquireAttempts += 1;
+        if (acquireAttempts >= 2) markBothTried();
+        return acquired;
+      },
+      release,
+    };
+
     function buildAdapter(workerId: string) {
       const job = createPollPricesJob({
         coinsRepo: createCoinsRepo(),
@@ -161,6 +181,8 @@ describe('poll-prices adapter (integration)', () => {
         coingecko: {
           getSimplePrices: async () => {
             callCount += 1;
+            // El tope evita un cuelgue si una sola instancia tomara ambos jobs.
+            await Promise.race([bothTried, new Promise((resolve) => setTimeout(resolve, 5000))]);
             return { prices: fakePrices(runAt), attempts: 1 };
           },
         },
@@ -176,6 +198,7 @@ describe('poll-prices adapter (integration)', () => {
         workerId,
         leaseTtlMs: 300000,
         logger: silentLogger,
+        lease: gatedLease,
       });
     }
 
@@ -222,5 +245,10 @@ describe('poll-prices adapter (integration)', () => {
       .find({ jobName: JOB_NAMES.POLL_PRICES, status: 'success' })
       .toArray();
     expect(successes).toHaveLength(1);
+    const skipped = await db
+      .collection('job_runs')
+      .find({ jobName: JOB_NAMES.POLL_PRICES, status: 'skipped', skipReason: 'locked' })
+      .toArray();
+    expect(skipped).toHaveLength(1);
   });
 });
