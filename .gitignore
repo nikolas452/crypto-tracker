@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# Artefacto de build generado por `npm run openapi:generate`; no se versiona.
+/openapi.json
+/openapi.json.tmp
 .env
 coverage/
 *.log

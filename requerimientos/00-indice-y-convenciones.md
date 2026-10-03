@@ -118,19 +118,22 @@ tests/
 }
 ```
 
-| code                  | HTTP | Cuándo                                                                     |
-| --------------------- | ---- | -------------------------------------------------------------------------- |
-| `VALIDATION_ERROR`    | 400  | Body, query o params inválidos                                             |
-| `UNAUTHENTICATED`     | 401  | Falta el token o es inválido                                               |
-| `TOKEN_EXPIRED`       | 401  | Token vencido                                                              |
-| `FORBIDDEN`           | 403  | Autenticado pero sin permiso                                               |
-| `NOT_FOUND`           | 404  | Recurso o ruta inexistente                                                 |
-| `CONFLICT`            | 409  | Duplicado (por ejemplo, moneda ya en la watchlist)                         |
-| `UNPROCESSABLE`       | 422  | Petición válida en forma pero no aplicable (por ejemplo, límite alcanzado) |
-| `RATE_LIMITED`        | 429  | Superó el rate limit de la API                                             |
-| `UPSTREAM_ERROR`      | 502  | Falló un servicio externo (CoinGecko, Firebase, SMTP)                      |
-| `SERVICE_UNAVAILABLE` | 503  | La base no está disponible                                                 |
-| `INTERNAL_ERROR`      | 500  | Cualquier error no previsto                                                |
+| code                   | HTTP | Cuándo                                                                     |
+| ---------------------- | ---- | -------------------------------------------------------------------------- |
+| `VALIDATION_ERROR`     | 400  | Body, query o params inválidos                                             |
+| `UNAUTHENTICATED`      | 401  | Falta el token o es inválido                                               |
+| `TOKEN_EXPIRED`        | 401  | Token vencido                                                              |
+| `TOKEN_REVOKED`        | 401  | Token válido pero revocado (se comprueba en rutas sensibles)               |
+| `FORBIDDEN`            | 403  | Autenticado pero sin permiso                                               |
+| `USER_DISABLED`        | 403  | La cuenta de Firebase del usuario está deshabilitada                       |
+| `NOT_FOUND`            | 404  | Recurso o ruta inexistente                                                 |
+| `CONFLICT`             | 409  | Duplicado (por ejemplo, moneda ya en la watchlist)                         |
+| `UNPROCESSABLE`        | 422  | Petición válida en forma pero no aplicable (por ejemplo, límite alcanzado) |
+| `RATE_LIMITED`         | 429  | Superó el rate limit de la API                                             |
+| `UPSTREAM_ERROR`       | 502  | Falló un servicio externo (CoinGecko, SMTP)                                |
+| `FIREBASE_UNAVAILABLE` | 502  | Firebase inalcanzable al verificar la revocación del token                 |
+| `SERVICE_UNAVAILABLE`  | 503  | La base no está disponible                                                 |
+| `INTERNAL_ERROR`       | 500  | Cualquier error no previsto                                                |
 
 - `details` es opcional. `requestId` siempre está presente.
 - En `production` nunca se devuelve el stack trace ni el mensaje interno de errores no previstos.
